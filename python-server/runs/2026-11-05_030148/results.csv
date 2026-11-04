@@ -1,0 +1,2 @@
+﻿thread_id,command_id,text,model_profile,judge_profile,command_to_first_action_seconds,judge_success,judge_rationale,steps,tool_success_rate,end_reason,total_seconds
+279af022-b2d2-4795-9823-9dce0d9d9403,7652ba88-70f3-4a4f-ac94-5cfe2d292c0a,석탄 1개와 철 1개를 주워서 화로 주변에 둬,local_qwen35_4b,local_qwen35_4b,2.633282300001156,False,The robot moved coal_2 and iron_2 to the furnace area but failed to pick up coal_1 as requested.,9,0.8888888888888888,answered,36.144

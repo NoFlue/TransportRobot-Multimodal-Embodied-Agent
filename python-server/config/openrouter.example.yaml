@@ -1,0 +1,4 @@
+# 이 파일을 openrouter.yaml로 복사하고 OpenRouter API key를 넣는다. openrouter.yaml은 공유하지 않는다.
+api_key: sk-or-...
+http_referer: http://localhost
+app_title: Multimodal Agent Test

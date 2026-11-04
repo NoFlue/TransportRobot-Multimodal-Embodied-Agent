@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "carrier-agent"
+version = "0.1.0"
+description = "Python cognition server for the Unity multimodal embodied agent (LangGraph ORA loop)."
+requires-python = ">=3.12"
+dependencies = [
+    "langchain-core>=1.7,<2",
+    "langgraph>=1.2,<2",
+    "langchain-openai>=1.7,<2",
+    "langchain-ollama>=1.1,<2",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "httpx>=0.28,<1",
+    "pydantic>=2.9,<3",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pytest-asyncio>=0.24"]
+
+[tool.setuptools.packages.find]
+include = ["agent*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

@@ -1,0 +1,25 @@
+server:
+  host: 127.0.0.1
+  port: 8000
+
+unity:
+  base_url: http://127.0.0.1:8001
+  request_timeout_seconds: 15
+  action_timeout_seconds: 90
+
+agent:
+  max_steps: 30
+  max_command_seconds: 900
+  # 구조화된 텍스트에서 두 객체를 "near"로 표시하는 수평 거리(m)
+  near_radius_meters: 3.0
+  # 연속 실패가 이 횟수에 이르면 관측에 재계획 지시([recovery])를 붙인다.
+  replan_after_failures: 3
+  # 연속 실패가 이 횟수에 이르면 남은 단계를 쓰지 않고 명령을 중단한다(end_reason=stuck).
+  max_consecutive_failures: 6
+
+judge:
+  enabled: true
+
+logging:
+  runs_dir: runs
+  save_images: true

@@ -1,0 +1,11 @@
+IMPORTANT LICENSE NOTICE
+
+Copyright (c) 2026 dglopez. All rights reserved.
+
+These 3D files may be used in licensed personal or commercial end products.
+They may NOT be sold, resold, redistributed, re-uploaded, mirrored, bundled,
+sublicensed or published as standalone assets, including converted or modified
+versions. Using an AI, agent, automated service or intermediary does not grant
+additional rights or create an exception.
+
+See ../LICENSE.txt for the complete terms.

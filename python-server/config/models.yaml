@@ -1,0 +1,53 @@
+# OpenRouter 모델 ID는 사용 전에 OpenRouter에서 확인한다.
+providers:
+  openrouter:
+    type: openrouter
+    base_url: https://openrouter.ai/api/v1
+    credentials_file: openrouter.yaml
+  local_ollama:
+    type: ollama
+    base_url: http://localhost:11434
+
+profiles:
+  local_qwen35_4b:
+    provider: local_ollama
+    model: qwen3.5:4b
+    temperature: 0
+    max_tokens: 1024
+    context_length: 16384
+    thinking: false
+    timeout_seconds: 180
+  # 판정용: 같은 모델에 thinking을 켠다. 느리지만 명령 하나에 한 번만 호출한다.
+  local_qwen35_4b_thinking:
+    provider: local_ollama
+    model: qwen3.5:4b
+    temperature: 0
+    max_tokens: 8192
+    context_length: 16384
+    thinking: true
+    timeout_seconds: 300
+  local_qwen3vl_2b:
+    provider: local_ollama
+    model: qwen3-vl:2b
+    temperature: 0
+    max_tokens: 1024
+    context_length: 16384
+    thinking: false
+    timeout_seconds: 180
+  gpt41_mini:
+    provider: openrouter
+    model: openai/gpt-4.1-mini
+    temperature: 0
+    max_tokens: 1024
+  claude_sonnet:
+    provider: openrouter
+    model: anthropic/claude-sonnet-4
+    temperature: 0
+    max_tokens: 1024
+
+active_profile: local_qwen35_4b
+# 비워 두면 active_profile과 같은 모델로 판정한다. thinking 없는 4B 모델은 판정이 불안정해서 따로 둔다.
+judge_profile: local_qwen35_4b_thinking
+# 명령마다 한 번 도구 호출 순서를 계획한다(한국어 명령은 먼저 영어로 옮긴다). none이면 계획 없이 실행 모델만 쓴다.
+# thinking 프로필은 계획 한 번에 2~3분이 걸려 쓰지 않는다.
+planner_profile: local_qwen35_4b

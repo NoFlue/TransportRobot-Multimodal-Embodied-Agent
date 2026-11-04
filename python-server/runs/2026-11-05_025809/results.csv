@@ -1,0 +1,2 @@
+﻿thread_id,command_id,text,model_profile,judge_profile,command_to_first_action_seconds,judge_success,judge_rationale,steps,tool_success_rate,end_reason,total_seconds
+28b3cd5c-e8d6-4796-98ff-874c1e493861,845b10e6-74cc-4bd4-ab95-2d621e937b18,석탄 1개와 철 1개를 주워서 화로 주변에 둬,local_qwen35_4b,local_qwen35_4b,2.178833099998883,False,The robot did not pick up any items and is currently holding nothing.,30,1.0,max_steps,63.279
