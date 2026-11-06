@@ -10,7 +10,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from pydantic import BaseModel, Field
 
 from agent.dto import ActRequestDTO, ObservationDTO
-from agent.prompts import PLANNER_PROMPT, REWRITE_PROMPT
+from agent.prompts import INTENT_PROMPT, PLANNER_PROMPT, REWRITE_PROMPT
 from agent.structured import structured_call
 from agent.tools import format_call
 from agent.world_text import describe_world, object_kind
@@ -25,6 +25,16 @@ class PlanStep(BaseModel):
     action: Literal["move_to", "look_at", "pick", "store", "drop"]
     label: str | None = None
     near_label: str | None = None
+
+
+class MotionGoal(BaseModel):
+    action: Literal["move_to", "look_at"]
+    label: str = Field(description="Exact target label; use the object name only if no matching label is known")
+
+
+class CommandIntent(BaseModel):
+    motion: list[MotionGoal] = Field(description="Explicit robot movement and gaze requests, in command order. Exclude travel implicit in pick/drop.")
+    transport: bool = Field(description="True only if the user requests picking, storing, dropping or relocating objects")
 
 
 class Requirement(BaseModel):
@@ -45,7 +55,7 @@ class Requirement(BaseModel):
 class PlanDraft(BaseModel):
     # 필드 순서가 곧 생각 순서다: 요구(개수 포함)를 먼저 정리하고 그다음 단계를 쓴다.
     requirements: list[Requirement] = Field(
-        description="What must be true when the command is done, with exact counts. Empty if no object has to be carried or placed."
+        description="Object carrying/placement requirements only. MUST be [] when intent.transport is false. Robot movement and gaze are specified separately by intent.motion."
     )
     steps: list[PlanStep] = Field(description="Ordered tool calls from the current state, without finish")
     note: str = Field(default="", description="Why the command cannot be done, if it cannot")
@@ -189,13 +199,15 @@ def check_plan(steps: list[PlanStep], observation: ObservationDTO, near_radius: 
     return simulation.requests, simulation.errors
 
 
-def drop_redundant_moves(requests: list[ActRequestDTO]) -> list[ActRequestDTO]:
-    """pick과 drop은 스스로 걸어가므로, 바로 뒤에 같은 대상을 쓰는 move_to는 뺀다."""
+def drop_redundant_moves(requests: list[ActRequestDTO], explicit_moves: set[str] | None = None) -> list[ActRequestDTO]:
+    """pick/drop의 보조 이동은 빼고, 사용자가 명시한 이동은 유지한다."""
     result = []
+    explicit_moves = explicit_moves or set()
     for i, request in enumerate(requests):
         following = requests[i + 1] if i + 1 < len(requests) else None
         if (
             request.action == "move_to"
+            and request.label not in explicit_moves
             and following is not None
             and (
                 (following.action == "pick" and following.label == request.label)
@@ -205,6 +217,28 @@ def drop_redundant_moves(requests: list[ActRequestDTO]) -> list[ActRequestDTO]:
             continue
         result.append(request)
     return result
+
+
+def check_intent(intent: CommandIntent, draft: PlanDraft, requests: list[ActRequestDTO], observation: ObservationDTO) -> list[str]:
+    """검사 중에도 원래 의도를 유지한다. 잘못 만든 운반 요구를 맞추려고 pick을 추가하지 않는다."""
+    errors = []
+    if not intent.transport:
+        if draft.requirements:
+            errors.append("This command requests no object transport. Remove the carrying/placement requirements; do not add pick/drop/store to satisfy them.")
+        moves = {g.label for g in intent.motion if g.action == "move_to"}
+        looks = {g.label for g in intent.motion}  # 이동 전 같은 대상을 바라보는 것은 허용한다.
+        for request in requests:
+            if (request.action not in ("move_to", "look_at")
+                    or request.label not in (moves if request.action == "move_to" else looks)):
+                errors.append(f"{format_call(request)} is not requested by the original movement/gaze intent. Remove it.")
+    # 없는 대상은 행동 없이 이유를 설명할 수 있다. 알려진 fixed 대상은 건너뛰지 못한다.
+    if any(observation.find(g.label) is None for g in intent.motion) and not requests and draft.note:
+        return errors
+    remaining = iter(requests)
+    for goal in intent.motion:
+        if not any(r.action == goal.action and r.label == goal.label for r in remaining):
+            errors.append(f"Missing requested {goal.action}({goal.label}) in command order. Preserve the original movement/gaze intent.")
+    return errors
 
 
 def resolve_destination(destination: str | None, objects: dict) -> str | None:
@@ -226,10 +260,14 @@ def check_requirements(
 ) -> list[str]:
     """모델이 정리한 요구와 계획의 최종 상태가 맞는지 본다. 개수 누락을 잡는다."""
     objects = {o.label: o for o in observation.objects}
+    kinds = {object_kind(label) for label in objects}
     start_carried = {observation.agent.holding, *observation.agent.inventory} - {None}
     touched = {r.label for r in simulation.requests if r.action == "pick"} | set(simulation.placed)
     errors = []
     for requirement in requirements:
+        if requirement.object_type not in kinds:
+            errors.append(f"Unknown object type {requirement.object_type!r}; use a type from the object list, not an object label.")
+            continue
         requirement = requirement.model_copy(update={"destination": resolve_destination(requirement.destination, objects)})
         kind = requirement.object_type
         if requirement.destination is None:
@@ -271,6 +309,7 @@ class PlanOutcome:
     errors: list[str]
     command: str  # 계획에 쓴 독립된 영어 지시
     drafts: list[str] = field(default_factory=list)  # 시도별 계획 원문(JSON), 디버깅용
+    intent: CommandIntent | None = None
 
 
 def carried_summary(observation: ObservationDTO) -> str:
@@ -295,6 +334,7 @@ async def rewrite_command(
         return command
     kinds = ", ".join(sorted({object_kind(o.label) for o in observation.objects}))
     system = f"{REWRITE_PROMPT}\nObject types in this world: {kinds}\nThe robot currently carries: {carried_summary(observation)}"
+    system += "\nExact object labels: " + ", ".join(o.label for o in observation.objects)
     if type_names:
         words = "; ".join(f"{' / '.join(names)} = {kind}" for kind, names in type_names.items() if names)
         system += f"\nWords the user uses for these types: {words}"
@@ -302,6 +342,14 @@ async def rewrite_command(
     response = await llm.ainvoke([SystemMessage(system), HumanMessage(content=user)])
     text = response.content if isinstance(response.content, str) else ""
     return text.strip().strip('"') or command
+
+
+async def infer_intent(llm: BaseChatModel, command: str, observation: ObservationDTO, near_radius: float, history: str, notes: str) -> CommandIntent:
+    """영어 재작성이나 플랜 초안과 독립적으로 원래 명령의 의도를 한 번 추출한다."""
+    return await structured_call(llm, CommandIntent, [
+        SystemMessage(INTENT_PROMPT),
+        HumanMessage(f"Conversation:\n{history or '(none)'}\nOriginal user command: {command}\n\n{describe_world(observation, near_radius)}\n{notes}"),
+    ])
 
 
 async def make_plan(
@@ -314,9 +362,24 @@ async def make_plan(
     rewritten: str | None = None,
     notes: str = "",
     attempts: int = 3,
+    intent: CommandIntent | None = None,
+    completed_motion: int = 0,
 ) -> PlanOutcome:
     english = rewritten or await rewrite_command(llm, command, observation, history)
-    text = f"Command: {english}\n\nCurrent state:\n{describe_world(observation, near_radius)}"
+    intent = intent or await infer_intent(llm, command, observation, near_radius, history, notes)
+    remaining_intent = intent.model_copy(update={"motion": intent.motion[completed_motion:]})
+    outcome = PlanOutcome(plan=None, errors=[], command=english, intent=intent)
+    if not intent.transport and intent.motion and all(observation.find(g.label) for g in remaining_intent.motion):
+        # 모델이 추출한 이동/시선은 이미 완전한 도구 인자다. 운반 계획을 다시 생성하지 않는다.
+        draft = PlanDraft(requirements=[], steps=[PlanStep(action=g.action, label=g.label) for g in remaining_intent.motion])
+        simulation = simulate(draft.steps, observation, near_radius)
+        outcome.errors = simulation.errors
+        if not outcome.errors:
+            outcome.plan = Plan(steps=simulation.requests, command=english)
+        return outcome
+    text = (f"Command: {english}\nOriginal user command: {command}\n"
+            f"Fixed intent (remaining goals from the original command): {remaining_intent.model_dump_json()}\n\n"
+            f"Current state:\n{describe_world(observation, near_radius)}")
     if notes:
         text += f"\n{notes}"
     if failures:
@@ -331,24 +394,27 @@ async def make_plan(
             ]
         ),
     ]
-    outcome = PlanOutcome(plan=None, errors=[], command=english)
     for _ in range(attempts):
         draft = await structured_call(llm, PlanDraft, messages)
         outcome.drafts.append(draft.model_dump_json())
         simulation = simulate(draft.steps, observation, near_radius)
         goal = "; ".join(r.describe() for r in draft.requirements)
-        plan = Plan(steps=drop_redundant_moves(simulation.requests), note=draft.note or goal, command=english)
-        if not simulation.errors:
-            # 세계 규칙은 지키는 계획. 요구 검사는 모델이 요구를 잘못 적어도 틀릴 수 있어 대안으로 남긴다.
-            outcome.plan = plan
-        outcome.errors = simulation.errors or check_requirements(draft.requirements, simulation, observation, near_radius)
+        requests = drop_redundant_moves(simulation.requests, {g.label for g in remaining_intent.motion if g.action == "move_to"})
+        plan = Plan(steps=requests, note=draft.note or goal, command=english)
+        # 의도 오류부터 고친다. 잘못된 운반 요구를 만족시키도록 행동을 늘리지 않는다.
+        outcome.errors = (
+            check_intent(remaining_intent, draft, requests, observation)
+            or simulation.errors
+            or check_requirements(draft.requirements, simulation, observation, near_radius)
+        )
         if not outcome.errors:
+            outcome.plan = plan
             return outcome
         messages.append(AIMessage(content=draft.model_dump_json()))
         messages.append(
             HumanMessage(
                 content="This plan is wrong:\n" + "\n".join(f"- {e}" for e in outcome.errors)
-                + "\nFix these problems and return a corrected complete plan from the current state."
+                + "\nRe-read the original command and fixed intent. Fix incorrect requirements as well as steps; do not invent object transport. Return a corrected complete plan from the current state."
             )
         )
     return outcome

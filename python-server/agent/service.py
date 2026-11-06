@@ -239,6 +239,8 @@ class AgentService:
                 self.graph.ainvoke(graph_input, config, context=ctx), timeout=agent_config.max_command_seconds
             )
             record.end_reason = final.get("end_reason") or "answered"
+            if record.end_reason == "planning_failed":
+                status = "failed"
         except asyncio.TimeoutError:
             record.end_reason = "timeout"
             self._post(record.thread_id, "system", "Command timed out.", record.command_id)

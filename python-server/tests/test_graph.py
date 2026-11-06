@@ -163,13 +163,19 @@ def mentions_json(*objects) -> str:
     return json.dumps({"objects": [{"name": name, "label": label} for name, label in objects]})
 
 
+def intent_json(*motion, transport=False) -> str:
+    return json.dumps({"motion": [{"action": action, "label": label} for action, label in motion], "transport": transport})
+
+
 async def test_plan_is_executed_without_asking_the_executor_and_uses_history(tmp_path):
     planner_replies = [
         "Put 1 coal next to the furnace.",
         mentions_json(("coal", None), ("furnace", "furnace_1")),
+        intent_json(transport=True),
         plan_json(("pick", "coal_1", None), ("drop", "coal_1", "furnace_1")),
         "Put iron_1 next to the furnace.",
         mentions_json(("iron", "iron_1"), ("furnace", "furnace_1")),
+        intent_json(transport=True),
         plan_json(("pick", "iron_1", None), ("drop", "iron_1", "furnace_1")),
     ]
     summaries = [AIMessage(content="석탄을 화로 옆에 두었습니다."), AIMessage(content="철도 화로 옆에 두었습니다.")]
@@ -213,6 +219,7 @@ async def test_failed_plan_step_triggers_an_immediate_replan(tmp_path):
     planner_replies = [
         "Put a coal next to the furnace.",
         mentions_json(("coal", None), ("furnace", "furnace_1")),
+        intent_json(transport=True),
         plan_json(("pick", "coal_1", None), ("drop", "coal_1", "furnace_1")),
         plan_json(("pick", "iron_1", None), ("drop", "iron_1", "furnace_1")),
     ]
@@ -230,7 +237,7 @@ async def test_failed_plan_step_triggers_an_immediate_replan(tmp_path):
     assert [(c["action"], c.get("label")) for c in world.act_calls] == [
         ("pick", "coal_1"), ("pick", "iron_1"), ("drop", "iron_1")
     ]
-    replan_prompt = service.planner_llm.prompts[3][1].content[0]["text"]
+    replan_prompt = service.planner_llm.prompts[4][1].content[0]["text"]
     assert replan_prompt.startswith("Command: Put a coal next to the furnace.")
     assert "The previous plan failed" in replan_prompt and "pick(label=coal_1) -> blocked" in replan_prompt
     assert len(llm.prompts) == 1 and record.reply == "대신 철을 두었습니다."
@@ -244,6 +251,7 @@ async def test_unknown_object_is_found_in_the_view_registered_and_used_by_the_pl
         mentions_json(("coal", None), ("barrel", "furnace_1")),
         '{"visible": false}',  # 정면(0°)
         '{"visible": true, "x": 480, "y": 610}',  # 오른쪽 60°
+        intent_json(transport=True),
         plan_json(("pick", "coal_1", None), ("drop", "coal_1", "barrel_1")),
     ]
     service, world, llm = make_service(
@@ -275,6 +283,7 @@ async def test_object_that_cannot_be_seen_is_reported_to_the_planner(tmp_path):
         "Go to the minecart.",
         mentions_json(("minecart", None)),
         *['{"visible": false}'] * 6,
+        intent_json(("move_to", "minecart")),
         json.dumps({"requirements": [], "steps": [], "note": "There is no minecart here."}),
     ]
     service, world, llm = make_service(
@@ -291,6 +300,39 @@ async def test_object_that_cannot_be_seen_is_reported_to_the_planner(tmp_path):
     plan_prompt = service.planner_llm.prompts[-1][1].content[0]["text"]
     assert "'minecart' is not in the object list and was not found" in plan_prompt
     assert world.act_calls == [] and record.reply == "광차를 찾지 못했습니다."
+
+
+async def test_rejected_gaze_plan_never_falls_back_to_unvalidated_executor(tmp_path):
+    planner_replies = [
+        "Look at coal_1.", mentions_json(("coal_1", "coal_1")),
+        intent_json(("look_at", "coal_1")),
+    ]
+    service, world, executor = make_service(
+        tmp_path, [call("pick", label="coal_1")], ['{"success": false, "rationale": "not performed"}'], planner_replies
+    )
+    world.holding = "coal_1"  # 소지품에 대한 look_at은 Unity 세계 규칙상 불가능하다.
+    await service.start()
+    try:
+        record = await service.run(service.create_thread().thread_id, "coal_1 쪽을 바라봐")
+    finally:
+        await service.stop()
+    assert record.status == "failed" and record.end_reason == "planning_failed" and record.steps == 0
+    assert world.act_calls == [] and executor.prompts == []
+
+
+async def test_gaze_intent_executes_only_look_without_generating_transport(tmp_path):
+    planner_replies = ["Look at coal_1.", mentions_json(("coal_1", "coal_1")), intent_json(("look_at", "coal_1"))]
+    service, world, executor = make_service(
+        tmp_path, [AIMessage(content="석탄을 바라봤습니다.")], ['{"success": true, "rationale": "facing coal"}'], planner_replies
+    )
+    await service.start()
+    try:
+        record = await service.run(service.create_thread().thread_id, "coal_1 쪽을 바라봐")
+    finally:
+        await service.stop()
+    assert record.end_reason == "answered" and record.steps == 1
+    assert world.act_calls == [{"action": "look_at", "label": "coal_1"}]
+    assert world.holding is None and len(service.planner_llm.prompts) == 3
 
 
 @pytest.mark.parametrize("profile", ["local_qwen35_4b", "gpt41_mini"])

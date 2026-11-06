@@ -1,7 +1,7 @@
 """LangGraph ORA(Observation -> Reasoning -> Act) 루프.
 
-계획이 있으면 계획 단계를 그대로 실행하고(계획 주도), 단계가 실패하면 현재 상태에서 다시 계획한다.
-계획이 없거나 다시 만든 계획의 단계도 실패하면 실행 모델이 한 단계씩 고른다(반응형).
+계획이 있으면 검증된 단계를 실행하고, 단계가 실패하면 현재 상태에서 다시 계획한다.
+계획 검증에 실패하면 중단한다. 플래너를 사용하지 않을 때만 실행 모델이 한 단계씩 고른다.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from langgraph.runtime import Runtime
 
 from agent.dto import ObservationDTO
 from agent.grounding import ground_objects
-from agent.planner import Plan, PlanOutcome, make_plan, rewrite_command
+from agent.planner import CommandIntent, Plan, PlanOutcome, make_plan, rewrite_command
 from agent.prompts import SUMMARY_PROMPT, SYSTEM_PROMPT
 from agent.tools import AGENT_TOOLS, FINISH_TOOL, ToolCallError, format_call, to_act_request
 from agent.unity_client import UnityClient
@@ -82,6 +82,9 @@ class CommandContext:
     # 연속 실패 기록. 성공하면 비운다.
     recent_failures: list[str] = field(default_factory=list)
     plan: Plan | None = None
+    intent: CommandIntent | None = None
+    motion_done: int = 0
+    planning_error: str | None = None
     planned: bool = False
     replanned_this_streak: bool = False
     plan_made_at: int = 0  # 계획을 만든 시점까지 실행한 단계 수
@@ -232,8 +235,10 @@ def build_graph(
             outcome = await make_plan(
                 planner_llm, ctx.text, observation, near_radius, failures, ctx.history,
                 rewritten=ctx.rewritten, notes=ctx.grounding_notes,
+                intent=ctx.intent,
+                completed_motion=ctx.motion_done,
             )
-        except Exception as exc:  # noqa: BLE001 - 계획 없이도 실행은 계속한다.
+        except Exception as exc:  # noqa: BLE001 - 검증하지 못한 명령은 행동 전에 중단한다.
             outcome = PlanOutcome(plan=None, errors=[f"{type(exc).__name__}: {exc}"], command=ctx.text)
         seconds = time.perf_counter() - started
         ctx.planning_seconds += seconds
@@ -246,18 +251,19 @@ def build_graph(
                 "plan": outcome.plan.summary() if outcome.plan else None,
                 "errors": outcome.errors,
                 "drafts": outcome.drafts,
+                "intent": outcome.intent.model_dump() if outcome.intent else None,
                 "seconds": round(seconds, 3),
             }
         )
-        if outcome.plan is not None:
+        ctx.intent = outcome.intent or ctx.intent
+        if outcome.plan is not None and not outcome.errors:
             ctx.plan = outcome.plan
+            ctx.planning_error = None
             ctx.plan_made_at = len(ctx.steps)
             ctx.on_event("plan", f"{'Re-plan' if failures else 'Plan'} [{outcome.command}]: {outcome.plan.summary()}")
-            if outcome.errors:
-                ctx.on_event("system", "Plan may not match the command: " + "; ".join(outcome.errors[:2]))
         else:
-            if failures:
-                ctx.plan = None  # 다시 계획하지 못하면 실행 모델이 이어받는다.
+            ctx.plan = None
+            ctx.planning_error = "; ".join(outcome.errors[:3]) or "No validated plan was returned."
             ctx.on_event("system", "Planner could not make a valid plan: " + "; ".join(outcome.errors[:3]))
 
     async def summarize(ctx: CommandContext) -> str:
@@ -308,6 +314,10 @@ def build_graph(
 
     async def reason(state: AgentState, runtime: Runtime[CommandContext]) -> dict[str, Any]:
         ctx = runtime.context
+        if ctx.planning_error:
+            ctx.reply = "명령에 맞는 실행 계획을 만들지 못해 중단했습니다."
+            ctx.on_event("agent", ctx.reply)
+            return {"messages": [AIMessage(content=ctx.reply)], "end_reason": "planning_failed"}
         if state.get("steps", 0) >= max_steps:
             ctx.on_event("system", f"Step limit ({max_steps}) reached.")
             return {"end_reason": "max_steps"}
@@ -417,6 +427,10 @@ def build_graph(
         outcome = "success" if result.success else "failed"
         if result.success and ctx.plan is not None:
             ctx.plan.mark(request)
+        if result.success and ctx.intent is not None and ctx.motion_done < len(ctx.intent.motion):
+            goal = ctx.intent.motion[ctx.motion_done]
+            if request.action == goal.action and request.label == goal.label:
+                ctx.motion_done += 1
         ctx.on_event("action", f"{format_call(request)} -> {outcome}: {result.feedback}")
         reply = ToolMessage(content=f"{outcome}: {result.feedback}", tool_call_id=call["id"], name=call["name"])
         return {"messages": [reply, *skipped], "steps": step, "pending_observation": result.observation.model_dump()}
