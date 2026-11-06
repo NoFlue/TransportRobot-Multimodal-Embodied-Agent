@@ -123,6 +123,8 @@ class AgentService:
             replan_after_failures=agent_config.replan_after_failures,
             max_consecutive_failures=agent_config.max_consecutive_failures,
             planner_llm=self.planner_llm,
+            ground_unknown_objects=agent_config.ground_unknown_objects,
+            type_names=agent_config.type_names,
             checkpointer=InMemorySaver(),
         )
         self.threads: dict[str, ThreadRecord] = {}

@@ -16,6 +16,13 @@ agent:
   replan_after_failures: 3
   # 연속 실패가 이 횟수에 이르면 남은 단계를 쓰지 않고 명령을 중단한다(end_reason=stuck).
   max_consecutive_failures: 6
+  # 명령에 나온 객체가 ObjectData 목록에 없으면 고개를 돌려 시점 이미지에서 찾고 Unity에 등록한다.
+  ground_unknown_objects: true
+  # 객체 종류(label 접두어)를 부르는 사용자 말. 명령을 다시 쓸 때 정확히 옮기도록 돕는다.
+  type_names:
+    coal: [석탄]
+    iron: [철, 철광석, 철 광석]
+    furnace: [화로]
 
 judge:
   enabled: true

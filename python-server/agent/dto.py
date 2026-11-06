@@ -64,3 +64,12 @@ class ActionResultDTO(_Dto):
     started_at: float
     finished_at: float
     observation: ObservationDTO
+
+
+class LocateResultDTO(_Dto):
+    """Unity /perceive/locate 응답. 새로 등록했거나(known=false) 이미 알던(known=true) 객체의 ObjectData."""
+
+    found: bool
+    known: bool = False
+    feedback: str = ""
+    object: ObjectDataDTO | None = None

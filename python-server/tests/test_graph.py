@@ -159,11 +159,17 @@ def plan_json(*steps) -> str:
     )
 
 
+def mentions_json(*objects) -> str:
+    return json.dumps({"objects": [{"name": name, "label": label} for name, label in objects]})
+
+
 async def test_plan_is_executed_without_asking_the_executor_and_uses_history(tmp_path):
     planner_replies = [
         "Put 1 coal next to the furnace.",
+        mentions_json(("coal", None), ("furnace", "furnace_1")),
         plan_json(("pick", "coal_1", None), ("drop", "coal_1", "furnace_1")),
         "Put iron_1 next to the furnace.",
+        mentions_json(("iron", "iron_1"), ("furnace", "furnace_1")),
         plan_json(("pick", "iron_1", None), ("drop", "iron_1", "furnace_1")),
     ]
     summaries = [AIMessage(content="석탄을 화로 옆에 두었습니다."), AIMessage(content="철도 화로 옆에 두었습니다.")]
@@ -185,7 +191,9 @@ async def test_plan_is_executed_without_asking_the_executor_and_uses_history(tmp
     assert first.reply == "석탄을 화로 옆에 두었습니다." and first.steps == 2 and first.end_reason == "answered"
     assert second.reply == "철도 화로 옆에 두었습니다."
 
-    rewrite_prompts = [p for p in service.planner_llm.prompts if isinstance(p[-1].content, str)]
+    rewrite_prompts = [
+        p for p in service.planner_llm.prompts if isinstance(p[-1].content, str) and "Latest command:" in p[-1].content
+    ]
     assert "Object types in this world: coal, furnace, iron" in rewrite_prompts[0][0].content
     assert rewrite_prompts[0][-1].content == "Latest command: 석탄 1개를 화로 옆에 둬"
     # 두 번째 명령은 이전 대화를 보고 '거기'를 푼다.
@@ -193,6 +201,10 @@ async def test_plan_is_executed_without_asking_the_executor_and_uses_history(tmp
     assert "Robot: 석탄을 화로 옆에 두었습니다." in rewrite_prompts[1][-1].content
 
     plans = [json.loads(line) for line in (service.recorder.run_dir / "plans.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [p["stage"] for p in plans] == ["grounding", "plan", "grounding", "plan"]
+    assert all(item["status"] == "known" for item in plans[0]["objects"])
+    assert world.view_calls == []  # 모두 아는 객체라 둘러보지 않는다
+    plans = [p for p in plans if p["stage"] == "plan"]
     assert [p["rewritten"] for p in plans] == ["Put 1 coal next to the furnace.", "Put iron_1 next to the furnace."]
     assert plans[0]["plan"] == "pick(coal_1) -> drop(coal_1, near furnace_1)"
 
@@ -200,8 +212,8 @@ async def test_plan_is_executed_without_asking_the_executor_and_uses_history(tmp
 async def test_failed_plan_step_triggers_an_immediate_replan(tmp_path):
     planner_replies = [
         "Put a coal next to the furnace.",
+        mentions_json(("coal", None), ("furnace", "furnace_1")),
         plan_json(("pick", "coal_1", None), ("drop", "coal_1", "furnace_1")),
-        "Put a coal next to the furnace.",
         plan_json(("pick", "iron_1", None), ("drop", "iron_1", "furnace_1")),
     ]
     service, world, llm = make_service(
@@ -219,9 +231,66 @@ async def test_failed_plan_step_triggers_an_immediate_replan(tmp_path):
         ("pick", "coal_1"), ("pick", "iron_1"), ("drop", "iron_1")
     ]
     replan_prompt = service.planner_llm.prompts[3][1].content[0]["text"]
+    assert replan_prompt.startswith("Command: Put a coal next to the furnace.")
     assert "The previous plan failed" in replan_prompt and "pick(label=coal_1) -> blocked" in replan_prompt
     assert len(llm.prompts) == 1 and record.reply == "대신 철을 두었습니다."
     assert record.steps == 3 and record.tool_success_rate == 2 / 3
+
+
+async def test_unknown_object_is_found_in_the_view_registered_and_used_by_the_plan(tmp_path):
+    planner_replies = [
+        "Put 1 coal next to the barrel.",
+        # 모델이 통에 화로 label을 붙여도 label은 쓰지 않고 이름으로 판단한다.
+        mentions_json(("coal", None), ("barrel", "furnace_1")),
+        '{"visible": false}',  # 정면(0°)
+        '{"visible": true, "x": 480, "y": 610}',  # 오른쪽 60°
+        plan_json(("pick", "coal_1", None), ("drop", "coal_1", "barrel_1")),
+    ]
+    service, world, llm = make_service(
+        tmp_path, [AIMessage(content="통 옆에 석탄을 두었습니다.")], ['{"success": true, "rationale": "ok"}'], planner_replies
+    )
+    world.hidden["barrel"] = (60.0, [5.0, -18.0])  # 60° 방향에서만 보이는 통
+    await service.start()
+    try:
+        thread = service.create_thread()
+        record = await service.run(thread.thread_id, "석탄 1개를 통 옆에 둬")
+    finally:
+        await service.stop()
+
+    assert world.view_calls == [60.0]  # 정면은 관측 이미지를 그대로 쓴다
+    assert world.locate_calls == [{"yaw": 60.0, "x": 0.48, "y": 0.61, "name": "barrel"}]
+    assert [(c["action"], c.get("label"), c.get("near_label")) for c in world.act_calls] == [
+        ("pick", "coal_1", None), ("drop", "coal_1", "barrel_1")
+    ]
+    plan_prompt = service.planner_llm.prompts[-1][1].content[0]["text"]
+    assert "- barrel_1 type=barrel fixed" in plan_prompt  # 등록된 객체가 관측에 들어간다
+    assert "'barrel' = barrel_1" in plan_prompt
+    events = [m["text"] for m in thread.messages if m["role"] == "system"]
+    assert any("found it by looking around (+60°): barrel_1" in e for e in events)
+    assert record.end_reason == "answered" and record.judge_success is True
+
+
+async def test_object_that_cannot_be_seen_is_reported_to_the_planner(tmp_path):
+    planner_replies = [
+        "Go to the minecart.",
+        mentions_json(("minecart", None)),
+        *['{"visible": false}'] * 6,
+        json.dumps({"requirements": [], "steps": [], "note": "There is no minecart here."}),
+    ]
+    service, world, llm = make_service(
+        tmp_path, [AIMessage(content="광차를 찾지 못했습니다.")], ['{"success": false, "rationale": "x"}'], planner_replies
+    )
+    await service.start()
+    try:
+        thread = service.create_thread()
+        record = await service.run(thread.thread_id, "광차로 가")
+    finally:
+        await service.stop()
+
+    assert world.view_calls == [60.0, -60.0, 120.0, -120.0, 180.0] and world.locate_calls == []
+    plan_prompt = service.planner_llm.prompts[-1][1].content[0]["text"]
+    assert "'minecart' is not in the object list and was not found" in plan_prompt
+    assert world.act_calls == [] and record.reply == "광차를 찾지 못했습니다."
 
 
 @pytest.mark.parametrize("profile", ["local_qwen35_4b", "gpt41_mini"])

@@ -1,0 +1,6 @@
+{
+  "name": "MultimodalAgent.InputTests",
+  "references": ["com.whisper.unity"],
+  "includePlatforms": ["Editor"],
+  "optionalUnityReferences": ["TestAssemblies"]
+}

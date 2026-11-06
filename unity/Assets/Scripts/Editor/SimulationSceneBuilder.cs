@@ -56,6 +56,7 @@ public static class SimulationSceneBuilder
         SetReference(runtime, "itemsRoot", items);
         var chat = runtimeObject.AddComponent<AgentChatPanel>();
         SetReference(chat, "runtime", runtime);
+        ConfigureCommandInputs(runtime);
 
         SetupOverviewCamera(scene);
         EditorSceneManager.MarkSceneDirty(scene);
@@ -63,6 +64,39 @@ public static class SimulationSceneBuilder
         EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
         AssetDatabase.SaveAssets();
         Debug.Log("Simulation Scene built.");
+    }
+
+    [MenuItem("Tools/Carrier Agent/Configure Command Inputs")]
+    public static void ConfigureSceneInputs()
+    {
+        var scene = EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
+        foreach (var runtime in Object.FindObjectsByType<CarrierAgentRuntime>(FindObjectsSortMode.None))
+            ConfigureCommandInputs(runtime);
+        EditorSceneManager.MarkSceneDirty(scene);
+        EditorSceneManager.SaveScene(scene);
+        Debug.Log("Chat and Whisper inputs configured.");
+    }
+
+    static void ConfigureCommandInputs(CarrierAgentRuntime runtime)
+    {
+        var target = runtime.gameObject;
+        if (target.GetComponent<AgentCommandClient>() == null) target.AddComponent<AgentCommandClient>();
+        var chat = target.GetComponent<AgentChatPanel>() ?? target.AddComponent<AgentChatPanel>();
+        SetReference(chat, "runtime", runtime);
+        var whisper = target.GetComponent<Whisper.WhisperManager>() ?? target.AddComponent<Whisper.WhisperManager>();
+        whisper.language = "ko";
+        whisper.translateToEnglish = false;
+        var settings = new SerializedObject(whisper);
+        settings.FindProperty("initOnAwake").boolValue = false;
+        settings.ApplyModifiedPropertiesWithoutUndo();
+        var voice = target.GetComponent<WhisperCommandInput>() ?? target.AddComponent<WhisperCommandInput>();
+        SetReference(voice, "whisper", whisper);
+        var runtimeSettings = new SerializedObject(runtime);
+        var sources = runtimeSettings.FindProperty("commandInputs");
+        sources.arraySize = 2;
+        sources.GetArrayElementAtIndex(0).objectReferenceValue = chat;
+        sources.GetArrayElementAtIndex(1).objectReferenceValue = voice;
+        runtimeSettings.ApplyModifiedPropertiesWithoutUndo();
     }
 
     [MenuItem("Tools/Carrier Agent/Build Windows Player")]

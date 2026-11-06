@@ -29,6 +29,10 @@ class FakeUnityWorld:
         }
         self.act_calls: list[dict] = []
         self.blocked: set[tuple[str, str]] = set()  # 실패시킬 (action, label)
+        self.fixed: set[str] = {"furnace_1"}
+        self.hidden: dict[str, tuple[float, list[float]]] = {}  # 이름 -> (보이는 yaw, 위치). 목록에 없는 객체
+        self.view_calls: list[float] = []
+        self.locate_calls: list[dict] = []
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
@@ -42,6 +46,12 @@ class FakeUnityWorld:
             return httpx.Response(200, json=self.observation())
         if route == "POST /act":
             return httpx.Response(200, json=self.act(json.loads(request.content)))
+        if route == "POST /perceive/view":
+            yaw = json.loads(request.content)["yaw"]
+            self.view_calls.append(yaw)
+            return httpx.Response(200, json={"yaw": yaw, "image_png_base64": PNG})
+        if route == "POST /perceive/locate":
+            return httpx.Response(200, json=self.locate(json.loads(request.content)))
         if route in ("POST /act/cancel", "POST /world/reset"):
             return httpx.Response(200, json={"cancelled": False, "status": "reset"})
         if route == "GET /health":
@@ -55,7 +65,7 @@ class FakeUnityWorld:
         objects = []
         for label, xz in sorted(self.objects.items()):
             carried = label == self.holding or label in self.inventory
-            objects.append({"label": label, "position": pos(self.agent if carried else xz)})
+            objects.append({"label": label, "position": pos(self.agent if carried else xz), "pickable": label not in self.fixed})
         return {
             "timestamp": self.clock,
             "agent": {"position": pos(self.agent), "holding": self.holding, "inventory": list(self.inventory)},
@@ -63,6 +73,19 @@ class FakeUnityWorld:
             "message": None,
             "image_png_base64": PNG,
         }
+
+    def locate(self, body: dict) -> dict:
+        self.locate_calls.append(body)
+        entry = self.hidden.get(body["name"])
+        if entry is None or entry[0] != body["yaw"]:
+            return {"found": False, "known": False, "feedback": "Only the ground is at that point of the view."}
+        label = f"{body['name']}_1"
+        self.objects[label] = entry[1]
+        self.fixed.add(label)
+        del self.hidden[body["name"]]
+        position = {"x": entry[1][0], "y": 0.0, "z": entry[1][1]}
+        return {"found": True, "known": False, "feedback": f"Registered as {label}.",
+                "object": {"label": label, "position": position, "pickable": False}}
 
     def distance(self, label: str) -> float:
         x, z = self.objects[label]

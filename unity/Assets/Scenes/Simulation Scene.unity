@@ -2686,6 +2686,9 @@ GameObject:
   - component: {fileID: 1139416209}
   - component: {fileID: 1139416208}
   - component: {fileID: 1139416207}
+  - component: {fileID: 1139416212}
+  - component: {fileID: 1139416211}
+  - component: {fileID: 1139416210}
   m_Layer: 0
   m_Name: AgentRuntime
   m_TagString: Untagged
@@ -2706,8 +2709,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MultimodalAgent.AgentChatPanel
   runtime: {fileID: 1139416208}
-  pythonBaseUrl: http://127.0.0.1:8000
-  pollSeconds: 1
 --- !u!114 &1139416208
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2725,6 +2726,9 @@ MonoBehaviour:
   port: 8001
   imageSize: 512
   actionTimeoutSeconds: 60
+  commandInputs:
+  - {fileID: 1139416207}
+  - {fileID: 1139416210}
 --- !u!4 &1139416209
 Transform:
   m_ObjectHideFlags: 0
@@ -2740,6 +2744,70 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1139416210
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1139416206}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 819a594f21eb0044c85880f2bc3b6c80, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultimodalAgent.WhisperCommandInput
+  whisper: {fileID: 1139416211}
+  language: ko
+  microphoneDevice: 
+  maxRecordingSeconds: 30
+  silenceRmsThreshold: 0.002
+--- !u!114 &1139416211
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1139416206}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d9370225a2ca94276b870d5f87b0db55, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: com.whisper.unity::Whisper.WhisperManager
+  logLevel: 1
+  modelPath: Whisper/ggml-tiny.bin
+  isModelPathInStreamingAssets: 1
+  initOnAwake: 0
+  useGpu: 0
+  flashAttention: 0
+  language: ko
+  translateToEnglish: 0
+  strategy: 0
+  noContext: 1
+  singleSegment: 0
+  enableTokens: 0
+  initialPrompt: 
+  stepSec: 3
+  keepSec: 0.2
+  lengthSec: 10
+  updatePrompt: 1
+  dropOldBuffer: 0
+  useVad: 1
+  tokensTimestamps: 0
+  audioCtx: 0
+--- !u!114 &1139416212
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1139416206}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cbe5099cd94a30246b507dd801fabee0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultimodalAgent.AgentCommandClient
+  pythonBaseUrl: http://127.0.0.1:8000
+  pollSeconds: 1
 --- !u!1001 &1199710284
 PrefabInstance:
   m_ObjectHideFlags: 0

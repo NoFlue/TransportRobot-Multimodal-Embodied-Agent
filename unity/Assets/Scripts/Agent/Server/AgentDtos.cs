@@ -59,4 +59,29 @@ namespace MultimodalAgent
         [JsonProperty("finished_at")] public double FinishedAt;
         [JsonProperty("observation")] public ObservationDto Observation;
     }
+
+    public sealed class ViewRequestDto
+    {
+        /// <summary>몸의 정면 기준 고개를 돌린 각도(도). 양수는 오른쪽.</summary>
+        [JsonProperty("yaw")] public float Yaw;
+    }
+
+    public sealed class LocateRequestDto
+    {
+        [JsonProperty("yaw")] public float Yaw;
+        /// <summary>이미지 좌표 0~1. x는 왼쪽, y는 위쪽 기준.</summary>
+        [JsonProperty("x")] public float X;
+        [JsonProperty("y")] public float Y;
+        /// <summary>객체 이름(영어). 새 label의 접두어가 된다. 예: barrel -> barrel_1</summary>
+        [JsonProperty("name")] public string Name;
+    }
+
+    public sealed class LocateResultDto
+    {
+        [JsonProperty("found")] public bool Found;
+        /// <summary>이미 등록된 객체였는지.</summary>
+        [JsonProperty("known")] public bool Known;
+        [JsonProperty("feedback")] public string Feedback;
+        [JsonProperty("object")] public ObjectDataDto Object;
+    }
 }

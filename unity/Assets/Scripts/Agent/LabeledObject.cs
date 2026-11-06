@@ -10,7 +10,7 @@ namespace MultimodalAgent
     {
         static readonly Dictionary<string, LabeledObject> Registry = new Dictionary<string, LabeledObject>();
 
-        [SerializeField] string label = "object_1";
+        [SerializeField] string label = "";
         [SerializeField] bool pickable = true;
 
         Collider[] colliders;
@@ -37,11 +37,22 @@ namespace MultimodalAgent
             pickable = isPickable;
         }
 
+        /// <summary>실행 중에 객체를 새로 등록한다. ObjectLocator가 관측 이미지로 찾은 객체에 쓴다.</summary>
+        public static LabeledObject Register(GameObject target, string newLabel, bool isPickable)
+        {
+            var obj = target.AddComponent<LabeledObject>(); // Awake는 label이 비어 있어 아직 등록하지 않는다.
+            obj.label = newLabel;
+            obj.pickable = isPickable;
+            Registry[newLabel] = obj;
+            return obj;
+        }
+
         void Awake()
         {
             colliders = GetComponentsInChildren<Collider>(true);
             body = GetComponent<Rigidbody>();
             FootprintRadius = MeasureFootprint();
+            if (string.IsNullOrEmpty(label)) return;
             if (Registry.TryGetValue(label, out var existing) && existing != null && existing != this)
             {
                 Debug.LogError($"Duplicate object label '{label}' on {name} and {existing.name}.");

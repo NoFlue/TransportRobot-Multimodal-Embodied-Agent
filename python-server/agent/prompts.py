@@ -51,7 +51,9 @@ Reply with JSON only: {"success": true or false, "rationale": "one or two senten
 REWRITE_PROMPT = """Rewrite the user's latest command to a carrier robot as one self-contained instruction in plain English.
 - Resolve references such as "it", "those", "the ones you hold", "there" or "too" with the robot's carried objects and the conversation.
 - A complaint about earlier work means: do that work now.
-- Keep every number, object and place. Name objects with the object types listed below.
+- Keep every number, object and place. Translate object names faithfully.
+  Use a listed type name only for an object of exactly that kind; never swap in a different listed type
+  (for example 통 is a barrel, not a furnace). Objects that are not listed keep their own English name.
 - Only a real question about the world stays a question.
 Reply with the instruction only.
 
@@ -66,3 +68,14 @@ SUMMARY_PROMPT = """You report to the user what a carrier robot just did for the
 Write one or two short sentences in the same language as the user's command.
 If the user asked a question, answer it from the current state.
 If no action was taken for another reason, give the planner's note (a reason or a clarifying question)."""
+
+MENTIONS_PROMPT = """Copy the physical object nouns that appear in the robot's command, including objects used as places.
+Use the words of the command, singular, without numbers. Do not add objects that the command does not mention.
+Do not list the robot itself, the ground, the hand or the inventory.
+Examples:
+- "Put one apple next to the bucket." -> apple, bucket
+- "Go to the big tree." -> big tree
+- "Pick up pear_2 near the red box." -> pear_2, red box"""
+
+LOCATE_PROMPT = """You locate objects in a first-person camera image of a 3D world.
+Coordinates are 0-1000: x from the left edge, y from the top edge. Answer visible=false if the object is not in the image."""

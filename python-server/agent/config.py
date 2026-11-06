@@ -32,6 +32,9 @@ class AgentConfig(BaseModel):
     near_radius_meters: float = 3.0
     replan_after_failures: int = 3
     max_consecutive_failures: int = 6
+    ground_unknown_objects: bool = True
+    # 객체 종류(label 접두어)의 사용자 언어 이름. 명령을 영어로 다시 쓸 때 쓴다.
+    type_names: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class JudgeConfig(BaseModel):

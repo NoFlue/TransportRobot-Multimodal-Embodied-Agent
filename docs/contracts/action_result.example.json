@@ -1,0 +1,68 @@
+{
+  "action": "move_to",
+  "success": true,
+  "feedback": "Arrived next to coal_1 (0.6 m).",
+  "started_at": 12.4,
+  "finished_at": 20.48,
+  "observation": {
+    "timestamp": 20.5,
+    "agent": {
+      "position": {
+        "x": -16.1,
+        "y": 0.4,
+        "z": 12.9
+      },
+      "holding": null,
+      "inventory": []
+    },
+    "objects": [
+      {
+        "label": "coal_1",
+        "position": {
+          "x": -17,
+          "y": 0.42,
+          "z": 14
+        },
+        "pickable": true
+      },
+      {
+        "label": "coal_2",
+        "position": {
+          "x": 16,
+          "y": 0.18,
+          "z": -11
+        },
+        "pickable": true
+      },
+      {
+        "label": "furnace_1",
+        "position": {
+          "x": 0,
+          "y": 0.35,
+          "z": 4
+        },
+        "pickable": false
+      },
+      {
+        "label": "iron_1",
+        "position": {
+          "x": 17,
+          "y": 0.27,
+          "z": 15
+        },
+        "pickable": true
+      },
+      {
+        "label": "iron_2",
+        "position": {
+          "x": -16,
+          "y": 0.33,
+          "z": -9
+        },
+        "pickable": true
+      }
+    ],
+    "message": "석탄 1개와 철 1개를 주워서 화로 주변에 둬",
+    "image_png_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+  }
+}

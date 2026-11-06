@@ -17,6 +17,7 @@ namespace MultimodalAgent
     /// 실행 피드백과 갱신된 관측을 돌려준다.
     /// </summary>
     [DefaultExecutionOrder(-100)]
+    [RequireComponent(typeof(AgentCommandClient))]
     public class CarrierAgentRuntime : MonoBehaviour
     {
         [SerializeField] CarrierAgent agent;
@@ -24,6 +25,11 @@ namespace MultimodalAgent
         [SerializeField] int port = 8001;
         [SerializeField] int imageSize = 512;
         [SerializeField] float actionTimeoutSeconds = 60f;
+        [Tooltip("Components implementing IAgentCommandInput. Empty uses components on this GameObject.")]
+        [SerializeField] MonoBehaviour[] commandInputs;
+
+        readonly List<IAgentCommandInput> subscribedInputs = new List<IAgentCommandInput>();
+        public AgentCommandClient Commands { get; private set; }
 
         static readonly Stopwatch Clock = Stopwatch.StartNew();
 
@@ -32,6 +38,7 @@ namespace MultimodalAgent
             new List<(LabeledObject, Transform, Vector3, Quaternion)>();
 
         AgentHttpServer server;
+        readonly ObjectLocator locator = new ObjectLocator();
         Vector3 agentStartPosition;
         Quaternion agentStartRotation;
 
@@ -47,8 +54,8 @@ namespace MultimodalAgent
         /// <summary>Unity 시계(초). Python은 /clock으로 자기 시계와의 차이를 보정한다.</summary>
         public static double Now => Clock.Elapsed.TotalSeconds;
 
-        /// <summary>Unity 채팅에서 마지막으로 입력받은 메세지. 관측에 담긴다.</summary>
-        public string LastMessage { get; set; }
+        /// <summary>입력 인터페이스를 통해 받은 마지막 명령. 관측에 담긴다.</summary>
+        public string LastMessage { get; private set; }
 
         /// <summary>HTTP 서버를 열지 못했을 때의 이유. 채팅 패널이 화면에 보여 준다.</summary>
         public string ServerError { get; private set; }
@@ -57,11 +64,42 @@ namespace MultimodalAgent
 
         void Awake()
         {
+            Commands = GetComponent<AgentCommandClient>();
             Application.runInBackground = true;
             foreach (var surface in FindObjectsByType<NavMeshSurface>(FindObjectsSortMode.None))
             {
                 if (surface.navMeshData == null) surface.BuildNavMesh();
             }
+        }
+
+        void OnEnable()
+        {
+            var sources = commandInputs != null && commandInputs.Length > 0
+                ? commandInputs : GetComponents<MonoBehaviour>();
+            foreach (var source in sources)
+            {
+                if (source is not IAgentCommandInput input || subscribedInputs.Contains(input)) continue;
+                input.CommandSubmitted += ReceiveCommand;
+                subscribedInputs.Add(input);
+            }
+        }
+
+        void OnDisable()
+        {
+            foreach (var input in subscribedInputs) input.CommandSubmitted -= ReceiveCommand;
+            subscribedInputs.Clear();
+        }
+
+        void ReceiveCommand(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return;
+            if (ServerError != null)
+            {
+                Commands.ReportError(ServerError);
+                return;
+            }
+            LastMessage = text.Trim();
+            Commands.Submit(LastMessage);
         }
 
         void Start()
@@ -126,6 +164,18 @@ namespace MultimodalAgent
                     return Json(200, new { unity_time = Now });
                 case "GET /observe":
                     return Json(200, await OnMainThread(BuildObservation));
+                case "POST /perceive/view":
+                {
+                    var view = Parse<ViewRequestDto>(body) ?? new ViewRequestDto();
+                    var image = await OnMainThread(() => Convert.ToBase64String(CaptureEyeImage(view.Yaw)));
+                    return Json(200, new { yaw = view.Yaw, image_png_base64 = image });
+                }
+                case "POST /perceive/locate":
+                {
+                    var locate = Parse<LocateRequestDto>(body);
+                    if (locate == null) return Json(400, new { error = "Body must be {yaw, x, y, name}." });
+                    return Json(200, await OnMainThread(() => locator.Locate(agent.EyeCamera, locate)));
+                }
                 case "POST /act":
                     return await HandleActAsync(body);
                 case "POST /act/cancel":
@@ -161,6 +211,35 @@ namespace MultimodalAgent
         }
 
         static HttpReply Json(int status, object payload) => new HttpReply(status, JsonConvert.SerializeObject(payload));
+
+        static T Parse<T>(string body) where T : class
+        {
+            if (string.IsNullOrWhiteSpace(body)) return null;
+            try
+            {
+                return JsonConvert.DeserializeObject<T>(body);
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>몸은 그대로 두고 시점 카메라만 yaw만큼 돌린 채 작업한다(고개 돌리기).</summary>
+        public static void WithYaw(Camera eye, float yaw, Action work)
+        {
+            var eyeTransform = eye.transform;
+            var saved = eyeTransform.rotation;
+            eyeTransform.rotation = Quaternion.AngleAxis(yaw, Vector3.up) * saved;
+            try
+            {
+                work();
+            }
+            finally
+            {
+                eyeTransform.rotation = saved;
+            }
+        }
 
         Task<T> OnMainThread<T>(Func<T> work)
         {
@@ -320,6 +399,7 @@ namespace MultimodalAgent
             {
                 obj.PlaceAt(parent, position, rotation);
             }
+            locator.Forget();
             agent.Teleport(agentStartPosition, agentStartRotation);
             LastMessage = null;
         }
@@ -347,21 +427,26 @@ namespace MultimodalAgent
             };
         }
 
-        byte[] CaptureEyeImage()
+        byte[] CaptureEyeImage(float yaw = 0f)
         {
             var eye = agent.EyeCamera;
             var target = RenderTexture.GetTemporary(imageSize, imageSize, 24, RenderTextureFormat.ARGB32);
             var previousTarget = eye.targetTexture;
             var previousActive = RenderTexture.active;
             var texture = new Texture2D(imageSize, imageSize, TextureFormat.RGB24, false);
+            byte[] png = null;
             try
             {
-                eye.targetTexture = target;
-                eye.Render();
-                RenderTexture.active = target;
-                texture.ReadPixels(new Rect(0, 0, imageSize, imageSize), 0, 0);
-                texture.Apply();
-                return texture.EncodeToPNG();
+                WithYaw(eye, yaw, () =>
+                {
+                    eye.targetTexture = target;
+                    eye.Render();
+                    RenderTexture.active = target;
+                    texture.ReadPixels(new Rect(0, 0, imageSize, imageSize), 0, 0);
+                    texture.Apply();
+                    png = texture.EncodeToPNG();
+                });
+                return png;
             }
             finally
             {

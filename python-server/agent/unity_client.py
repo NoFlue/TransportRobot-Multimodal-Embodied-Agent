@@ -7,7 +7,7 @@ import time
 import httpx
 
 from agent.config import UnityConfig
-from agent.dto import ActionResultDTO, ActRequestDTO, ObservationDTO
+from agent.dto import ActionResultDTO, ActRequestDTO, LocateResultDTO, ObservationDTO
 
 
 class UnityError(RuntimeError):
@@ -69,6 +69,15 @@ class UnityClient:
         payload = request.model_dump(exclude_none=True)
         data = await self._request("POST", "/act", json=payload, timeout=self._config.action_timeout_seconds)
         return ActionResultDTO.model_validate(data)
+
+    async def view(self, yaw: float) -> str:
+        """몸은 그대로 두고 고개를 yaw도 돌린 시점 이미지(PNG base64)."""
+        return (await self._request("POST", "/perceive/view", json={"yaw": yaw}))["image_png_base64"]
+
+    async def locate(self, yaw: float, x: float, y: float, name: str) -> LocateResultDTO:
+        """yaw 시점 이미지의 (x, y)(0~1, 왼쪽 위 기준)에 있는 객체를 특정해 등록한다."""
+        payload = {"yaw": yaw, "x": x, "y": y, "name": name}
+        return LocateResultDTO.model_validate(await self._request("POST", "/perceive/locate", json=payload))
 
     async def cancel(self) -> bool:
         return bool((await self._request("POST", "/act/cancel"))["cancelled"])

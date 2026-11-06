@@ -19,7 +19,8 @@ from langgraph.graph.message import add_messages
 from langgraph.runtime import Runtime
 
 from agent.dto import ObservationDTO
-from agent.planner import Plan, PlanOutcome, make_plan
+from agent.grounding import ground_objects
+from agent.planner import Plan, PlanOutcome, make_plan, rewrite_command
 from agent.prompts import SUMMARY_PROMPT, SYSTEM_PROMPT
 from agent.tools import AGENT_TOOLS, FINISH_TOOL, ToolCallError, format_call, to_act_request
 from agent.unity_client import UnityClient
@@ -66,6 +67,9 @@ class CommandContext:
     on_plan: Callable[[dict], None] = lambda record: None
     # 같은 대화의 이전 명령과 응답. 지시어를 풀 때 쓴다.
     history: str = ""
+    # 계획에 쓰는 독립된 영어 지시와, 관측 이미지로 찾은 객체 메모
+    rewritten: str | None = None
+    grounding_notes: str = ""
     steps: list[StepRecord] = field(default_factory=list)
     first_observation: ObservationDTO | None = None
     last_observation: ObservationDTO | None = None
@@ -182,20 +186,60 @@ def build_graph(
     replan_after_failures: int = 3,
     max_consecutive_failures: int = 6,
     planner_llm: BaseChatModel | None = None,
+    ground_unknown_objects: bool = True,
+    type_names: dict[str, list[str]] | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
 ):
     model = llm.bind_tools(AGENT_TOOLS)
 
+    async def ground(ctx: CommandContext, observation: ObservationDTO) -> ObservationDTO:
+        """명령을 다시 쓰고, 목록에 없는 객체를 시점 이미지에서 찾아 Unity에 등록한다."""
+        started = time.perf_counter()
+        try:
+            ctx.rewritten = await rewrite_command(planner_llm, ctx.text, observation, ctx.history, type_names)
+        except Exception as exc:  # noqa: BLE001 - 다시 쓰기 실패는 계획 단계가 다시 시도한다.
+            ctx.on_event("system", f"Command rewrite failed: {type(exc).__name__}: {exc}")
+            return observation
+        if not ground_unknown_objects:
+            return observation
+        try:
+            report = await ground_objects(planner_llm, unity, ctx.rewritten, observation)
+        except Exception as exc:  # noqa: BLE001 - 찾지 못해도 아는 객체로 계획은 한다.
+            ctx.on_event("system", f"Object grounding failed: {type(exc).__name__}: {exc}")
+            return observation
+        seconds = time.perf_counter() - started
+        ctx.planning_seconds += seconds
+        ctx.grounding_notes = report.notes()
+        ctx.on_plan(
+            {"stage": "grounding", "command": ctx.text, "rewritten": ctx.rewritten,
+             "objects": report.as_record(), "seconds": round(seconds, 3)}
+        )
+        for item in report.items:
+            if item.status == "found":
+                ctx.on_event("system", f"'{item.name}' was not in the object list; found it by looking around ({item.yaw:+.0f}°): {item.label}")
+            elif item.status == "not_found":
+                ctx.on_event("system", f"'{item.name}' is not in the object list and was not found by looking around.")
+        if report.registered:
+            # 새로 등록한 객체가 들어간 관측으로 바꾼다. 아무것도 움직이지 않았으므로 시작 상태로도 쓴다.
+            observation = await unity.observe()
+            ctx.first_observation = observation
+            ctx.last_observation = observation
+        return observation
+
     async def plan(ctx: CommandContext, observation: ObservationDTO, failures: list[str] | None) -> None:
         started = time.perf_counter()
         try:
-            outcome = await make_plan(planner_llm, ctx.text, observation, near_radius, failures, ctx.history)
+            outcome = await make_plan(
+                planner_llm, ctx.text, observation, near_radius, failures, ctx.history,
+                rewritten=ctx.rewritten, notes=ctx.grounding_notes,
+            )
         except Exception as exc:  # noqa: BLE001 - 계획 없이도 실행은 계속한다.
             outcome = PlanOutcome(plan=None, errors=[f"{type(exc).__name__}: {exc}"], command=ctx.text)
         seconds = time.perf_counter() - started
         ctx.planning_seconds += seconds
         ctx.on_plan(
             {
+                "stage": "plan",
                 "replan": bool(failures),
                 "command": ctx.text,
                 "rewritten": outcome.command,
@@ -237,6 +281,7 @@ def build_graph(
             ctx.first_observation = observation
         if planner_llm is not None and not ctx.planned:
             ctx.planned = True
+            observation = await ground(ctx, observation)
             await plan(ctx, observation, None)
         elif (
             planner_llm is not None

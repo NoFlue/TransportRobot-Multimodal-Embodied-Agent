@@ -280,7 +280,13 @@ def carried_summary(observation: ObservationDTO) -> str:
     return ", ".join(items) or "nothing"
 
 
-async def rewrite_command(llm: BaseChatModel, command: str, observation: ObservationDTO, history: str = "") -> str:
+async def rewrite_command(
+    llm: BaseChatModel,
+    command: str,
+    observation: ObservationDTO,
+    history: str = "",
+    type_names: dict[str, list[str]] | None = None,
+) -> str:
     """명령을 대화 맥락과 현재 소지품으로 풀어서 독립된 영어 지시로 바꾼다.
 
     작은 모델은 한국어 명령의 대상과 '그거', '들고 있는 것' 같은 지시어를 자주 놓친다.
@@ -289,6 +295,9 @@ async def rewrite_command(llm: BaseChatModel, command: str, observation: Observa
         return command
     kinds = ", ".join(sorted({object_kind(o.label) for o in observation.objects}))
     system = f"{REWRITE_PROMPT}\nObject types in this world: {kinds}\nThe robot currently carries: {carried_summary(observation)}"
+    if type_names:
+        words = "; ".join(f"{' / '.join(names)} = {kind}" for kind, names in type_names.items() if names)
+        system += f"\nWords the user uses for these types: {words}"
     user = (f"Conversation so far:\n{history}\n\n" if history else "") + f"Latest command: {command}"
     response = await llm.ainvoke([SystemMessage(system), HumanMessage(content=user)])
     text = response.content if isinstance(response.content, str) else ""
@@ -302,10 +311,14 @@ async def make_plan(
     near_radius: float,
     failures: list[str] | None = None,
     history: str = "",
+    rewritten: str | None = None,
+    notes: str = "",
     attempts: int = 3,
 ) -> PlanOutcome:
-    english = await rewrite_command(llm, command, observation, history)
+    english = rewritten or await rewrite_command(llm, command, observation, history)
     text = f"Command: {english}\n\nCurrent state:\n{describe_world(observation, near_radius)}"
+    if notes:
+        text += f"\n{notes}"
     if failures:
         text += "\n\nThe previous plan failed. Recent failed actions:\n" + "\n".join(f"- {f}" for f in failures[-5:])
         text += "\nPlan the remaining work from the current state."
