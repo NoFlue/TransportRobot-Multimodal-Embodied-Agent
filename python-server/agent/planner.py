@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -19,6 +20,8 @@ from agent.world_text import describe_world, object_kind
 INVENTORY_CAPACITY = 4
 # 요구의 목적지: 특정 객체 옆이 아니라 어디든 내려놓기
 GROUND = "ground"
+# 요구의 목적지: 인벤토리에 넣어 두기(store)
+INVENTORY = "inventory"
 
 
 class PlanStep(BaseModel):
@@ -29,7 +32,9 @@ class PlanStep(BaseModel):
 
 class MotionGoal(BaseModel):
     action: Literal["move_to", "look_at"]
-    label: str = Field(description="Exact target label; use the object name only if no matching label is known")
+    label: str = Field(
+        description="Exact label if the command names one (e.g. coal_2); otherwise the object type (e.g. iron); the object name only if it matches no type"
+    )
 
 
 class CommandIntent(BaseModel):
@@ -41,12 +46,17 @@ class Requirement(BaseModel):
     object_type: str = Field(description="Object type exactly as shown after type= in the object list, e.g. coal")
     count: int = Field(ge=1, description="How many distinct objects of this type")
     destination: str | None = Field(
-        description="Label of the object to place them next to, 'ground' to put them down anywhere, or null if they only need to be picked up"
+        description=(
+            "Label of the object to place them next to, 'ground' to put them down anywhere, "
+            "'inventory' to store them in the inventory, or null only if they just need to be picked up and held"
+        )
     )
 
     def describe(self) -> str:
         if self.destination == GROUND:
             where = "put down"
+        elif self.destination == INVENTORY:
+            where = "stored in the inventory"
         else:
             where = f"next to {self.destination}" if self.destination else "picked up"
         return f"{self.count} {self.object_type} {where}"
@@ -222,28 +232,59 @@ def drop_redundant_moves(requests: list[ActRequestDTO], explicit_moves: set[str]
 def check_intent(intent: CommandIntent, draft: PlanDraft, requests: list[ActRequestDTO], observation: ObservationDTO) -> list[str]:
     """검사 중에도 원래 의도를 유지한다. 잘못 만든 운반 요구를 맞추려고 pick을 추가하지 않는다."""
     errors = []
-    if not intent.transport:
-        if draft.requirements:
-            errors.append("This command requests no object transport. Remove the carrying/placement requirements; do not add pick/drop/store to satisfy them.")
-        moves = {g.label for g in intent.motion if g.action == "move_to"}
-        looks = {g.label for g in intent.motion}  # 이동 전 같은 대상을 바라보는 것은 허용한다.
-        for request in requests:
-            if (request.action not in ("move_to", "look_at")
-                    or request.label not in (moves if request.action == "move_to" else looks)):
-                errors.append(f"{format_call(request)} is not requested by the original movement/gaze intent. Remove it.")
+    if not intent.transport and draft.requirements:
+        errors.append("This command requests no object transport. Remove the carrying/placement requirements; do not add pick/drop/store to satisfy them.")
+    moves = {g.label for g in intent.motion if g.action == "move_to"}
+    looks = {g.label for g in intent.motion}  # 이동 전 같은 대상을 바라보는 것은 허용한다.
+    for request in requests:
+        # 운반 명령이어도 사용자가 말하지 않은 이동·시선은 넣지 않는다. pick/drop의 보조 이동은 이미 뺐다.
+        if request.action in ("move_to", "look_at"):
+            unrequested = request.label not in (moves if request.action == "move_to" else looks)
+        else:
+            unrequested = not intent.transport
+        if unrequested:
+            errors.append(f"{format_call(request)} is not requested by the original movement/gaze intent. Remove it.")
     # 없는 대상은 행동 없이 이유를 설명할 수 있다. 알려진 fixed 대상은 건너뛰지 못한다.
     if any(observation.find(g.label) is None for g in intent.motion) and not requests and draft.note:
         return errors
     remaining = iter(requests)
     for goal in intent.motion:
-        if not any(r.action == goal.action and r.label == goal.label for r in remaining):
+        if not any(reaches(r, goal) for r in remaining):
             errors.append(f"Missing requested {goal.action}({goal.label}) in command order. Preserve the original movement/gaze intent.")
     return errors
 
 
+def reaches(request: ActRequestDTO, goal: MotionGoal) -> bool:
+    """요청한 이동·시선을 이 호출이 해내는지. pick(X)와 drop(..., near X)도 X까지 걸어가므로 move_to(X)를 채운다."""
+    if request.action == goal.action and request.label == goal.label:
+        return True
+    return goal.action == "move_to" and (
+        (request.action == "pick" and request.label == goal.label)
+        or (request.action == "drop" and request.near_label == goal.label)
+    )
+
+
+def resolve_motion_targets(
+    intent: CommandIntent, observation: ObservationDTO, type_names: dict[str, list[str]] | None = None
+) -> CommandIntent:
+    """의도의 대상이 종류 이름(iron, 철광석)이면 에이전트와 가장 가까운 그 종류의 객체 label로 바꾼다."""
+    words = {word: kind for kind, names in (type_names or {}).items() for word in names}
+    carried = {observation.agent.holding, *observation.agent.inventory}
+    goals = []
+    for goal in intent.motion:
+        if observation.find(goal.label) is None:
+            kind = words.get(goal.label, goal.label)
+            candidates = [o for o in observation.objects if object_kind(o.label) == kind and o.label not in carried]
+            if candidates:
+                nearest = min(candidates, key=lambda o: o.position.horizontal_distance(observation.agent.position))
+                goal = goal.model_copy(update={"label": nearest.label})
+        goals.append(goal)
+    return intent.model_copy(update={"motion": goals})
+
+
 def resolve_destination(destination: str | None, objects: dict) -> str | None:
     """목적지를 label이나 종류 이름으로 정리한다. 문장 안의 label을 찾고, 둘 다 없으면 '들고 있기'(None)로 본다."""
-    if destination is None or destination in objects or destination == GROUND:
+    if destination is None or destination in objects or destination in (GROUND, INVENTORY):
         return destination
     kinds = {object_kind(label) for label in objects}
     if destination in kinds:
@@ -264,6 +305,7 @@ def check_requirements(
     start_carried = {observation.agent.holding, *observation.agent.inventory} - {None}
     touched = {r.label for r in simulation.requests if r.action == "pick"} | set(simulation.placed)
     errors = []
+    useful: set[str] = set()  # 요구를 채우는 객체. 이미 들고 있거나 제자리에 있는 객체를 먼저 쓴다.
     for requirement in requirements:
         if requirement.object_type not in kinds:
             errors.append(f"Unknown object type {requirement.object_type!r}; use a type from the object list, not an object label.")
@@ -276,6 +318,9 @@ def check_requirements(
         elif requirement.destination == GROUND:
             # 내려놓으라는 요구: 계획에서 내려놓은 객체를 센다.
             matched = sorted(label for label in simulation.placed if object_kind(label) == kind)
+        elif requirement.destination == INVENTORY:
+            # 인벤토리에 넣으라는 요구: 계획이 끝났을 때 인벤토리에 있는 객체를 센다.
+            matched = sorted(label for label in simulation.inventory if object_kind(label) == kind)
         else:
             # 목적지가 종류 이름이면 그 종류의 어느 객체 옆이든 된다.
             anchors = (
@@ -300,6 +345,19 @@ def check_requirements(
                 f"requirement '{requirement.describe()}' is not met: the plan ends with {len(matched)} "
                 f"({', '.join(matched) or 'none'}). Add steps for {requirement.count - len(matched)} more distinct {kind}"
             )
+        useful.update(sorted(matched, key=lambda label: label in simulation.picked)[: requirement.count])
+    # 요구가 맞게 채워졌으면, 어떤 요구에도 쓰이지 않는 객체를 줍는 계획도 잡는다.
+    if errors or not requirements:
+        return errors
+    # pick은 손이 차 있으면 스스로 인벤토리로 옮기므로, store는 인벤토리에 넣으라는 요구가 있을 때만 쓴다.
+    if any(r.action == "store" for r in simulation.requests) and all(r.destination != INVENTORY for r in requirements):
+        errors.append("No requirement asks to store objects in the inventory. Remove store(); pick already keeps what you carry.")
+    extra = sorted(simulation.picked - useful)
+    if extra:
+        errors.append(
+            f"The plan picks {', '.join(extra)}, which no requirement needs. Remove the steps for {', '.join(extra)}; "
+            "objects you already carry or that are already in place count."
+        )
     return errors
 
 
@@ -344,11 +402,41 @@ async def rewrite_command(
     return text.strip().strip('"') or command
 
 
-async def infer_intent(llm: BaseChatModel, command: str, observation: ObservationDTO, near_radius: float, history: str, notes: str) -> CommandIntent:
+def type_words(type_names: dict[str, list[str]] | None) -> str:
+    if not type_names:
+        return ""
+    return "; ".join(f"{' / '.join(names)} = {kind}" for kind, names in type_names.items() if names)
+
+
+def annotate_types(command: str, type_names: dict[str, list[str]] | None) -> str:
+    """명령의 종류 단어 뒤에 종류 이름을 붙인다. 예: 철광석 쪽을 바라봐 -> 철광석(iron) 쪽을 바라봐"""
+    words = {word: kind for kind, names in (type_names or {}).items() for word in names}
+    if not words:
+        return command
+    pattern = "|".join(re.escape(word) for word in sorted(words, key=len, reverse=True))
+    return re.sub(pattern, lambda match: f"{match.group(0)}({words[match.group(0)]})", command)
+
+
+async def infer_intent(
+    llm: BaseChatModel,
+    command: str,
+    observation: ObservationDTO,
+    near_radius: float,
+    history: str,
+    notes: str,
+    type_names: dict[str, list[str]] | None = None,
+    english: str | None = None,
+) -> CommandIntent:
     """영어 재작성이나 플랜 초안과 독립적으로 원래 명령의 의도를 한 번 추출한다."""
+    words = type_words(type_names)
+    words = f"\nWords the user uses for object types: {words}" if words else ""
+    translation = f"\nEnglish translation (for reference; the original command wins): {english}" if english and english != command else ""
     return await structured_call(llm, CommandIntent, [
         SystemMessage(INTENT_PROMPT),
-        HumanMessage(f"Conversation:\n{history or '(none)'}\nOriginal user command: {command}\n\n{describe_world(observation, near_radius)}\n{notes}"),
+        HumanMessage(
+            f"Conversation:\n{history or '(none)'}\nOriginal user command: {annotate_types(command, type_names)}{translation}\n\n"
+            f"{describe_world(observation, near_radius)}{words}\n{notes}"
+        ),
     ])
 
 
@@ -364,9 +452,12 @@ async def make_plan(
     attempts: int = 3,
     intent: CommandIntent | None = None,
     completed_motion: int = 0,
+    type_names: dict[str, list[str]] | None = None,
 ) -> PlanOutcome:
     english = rewritten or await rewrite_command(llm, command, observation, history)
-    intent = intent or await infer_intent(llm, command, observation, near_radius, history, notes)
+    if intent is None:
+        intent = await infer_intent(llm, command, observation, near_radius, history, notes, type_names, english)
+        intent = resolve_motion_targets(intent, observation, type_names)
     remaining_intent = intent.model_copy(update={"motion": intent.motion[completed_motion:]})
     outcome = PlanOutcome(plan=None, errors=[], command=english, intent=intent)
     if not intent.transport and intent.motion and all(observation.find(g.label) for g in remaining_intent.motion):

@@ -21,7 +21,7 @@ agent:
   # 객체 종류(label 접두어)를 부르는 사용자 말. 명령을 다시 쓸 때 정확히 옮기도록 돕는다.
   type_names:
     coal: [석탄]
-    iron: [철, 철광석, 철 광석]
+    iron: [철, 철광석, 철 광석, iron ore]
     furnace: [화로]
 
 judge:

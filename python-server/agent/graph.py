@@ -237,6 +237,7 @@ def build_graph(
                 rewritten=ctx.rewritten, notes=ctx.grounding_notes,
                 intent=ctx.intent,
                 completed_motion=ctx.motion_done,
+                type_names=type_names,
             )
         except Exception as exc:  # noqa: BLE001 - 검증하지 못한 명령은 행동 전에 중단한다.
             outcome = PlanOutcome(plan=None, errors=[f"{type(exc).__name__}: {exc}"], command=ctx.text)
