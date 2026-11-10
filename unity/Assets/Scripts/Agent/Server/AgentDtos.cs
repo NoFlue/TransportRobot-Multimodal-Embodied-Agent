@@ -66,6 +66,12 @@ namespace MultimodalAgent
         [JsonProperty("yaw")] public float Yaw;
     }
 
+    public sealed class ResetRequestDto
+    {
+        /// <summary>객체 배치 시드. 없으면 처음 배치로 되돌린다.</summary>
+        [JsonProperty("seed")] public int? Seed;
+    }
+
     public sealed class LocateRequestDto
     {
         [JsonProperty("yaw")] public float Yaw;

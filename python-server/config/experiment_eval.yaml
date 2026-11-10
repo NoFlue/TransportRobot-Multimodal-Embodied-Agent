@@ -1,0 +1,362 @@
+# 평가 세트(held-out). python -m agent experiment --suite config/experiment_eval.yaml
+# 개발에 쓴 명령(config/experiment_en.yaml, 검토용 명령 17개)과 겹치지 않게 새로 썼다.
+# 이 파일의 명령으로는 계획을 미리 돌려 보지 않았다. 프롬프트·검사 규칙을 이 명령에 맞춰 고치지 않는다.
+# 영역마다 서로 다른 명령 20개, 각 1회. 형식은 config/experiment.yaml 설명을 따른다.
+# 초기 배치: coal_1(-17,14) coal_2(16,-11) iron_1(17,15) iron_2(-16,-9) furnace_1(0,4, 고정), 에이전트(0,-22).
+
+trials: 20
+
+areas:
+  - id: single
+    name: 단일 행동
+    measure_steps: false
+    tasks:
+      - command: "Walk up to iron_2."
+        steps: [{tool: move_to, label: iron_2}]
+        goals: [{agent_near: iron_2}, {empty_handed: true}]
+      - command: "Head over to the furnace."
+        steps: [{tool: move_to, label: furnace_1}]
+        goals: [{agent_near: furnace_1}, {empty_handed: true}]
+      - command: "Go stand next to a piece of coal."
+        steps: [{tool: move_to, label: coal}]
+        goals: [{agent_near: coal}, {empty_handed: true}]
+      - command: "Approach coal_1."
+        steps: [{tool: move_to, label: coal_1}]
+        goals: [{agent_near: coal_1}, {empty_handed: true}]
+      - command: "Face coal_2."
+        steps: [{tool: look_at, label: coal_2}]
+        goals: [{empty_handed: true}]
+      - command: "Turn to look at the furnace."
+        steps: [{tool: look_at, label: furnace_1}]
+        goals: [{empty_handed: true}]
+      - command: "Glance at iron_1."
+        steps: [{tool: look_at, label: iron_1}]
+        goals: [{empty_handed: true}]
+      - command: "Point your camera at a coal."
+        steps: [{tool: look_at, label: coal}]
+        goals: [{empty_handed: true}]
+      - command: "Grab iron_1."
+        steps: [{tool: pick, label: iron_1}]
+        goals: [{carrying: iron_1}]
+      - command: "Lift a piece of iron ore off the ground."
+        steps: [{tool: pick, label: iron}]
+        goals: [{carrying: iron}]
+      - command: "Collect coal_1."
+        steps: [{tool: pick, label: coal_1}]
+        goals: [{carrying: coal_1}]
+      - command: "Get iron_2 into your hand."
+        steps: [{tool: pick, label: iron_2}]
+        goals: [{carrying: iron_2}]
+      - command: "Put coal_2 into storage."
+        setup: [{action: pick, label: coal_2}]
+        steps: [{tool: store}]
+        goals: [{inventory: coal_2}]
+      - command: "Move the iron in your hand to your inventory."
+        setup: [{action: pick, label: iron_1}]
+        steps: [{tool: store}]
+        goals: [{inventory: iron_1}]
+      - command: "Keep the coal in your bag instead of your hand."
+        setup: [{action: pick, label: coal_1}]
+        steps: [{tool: store}]
+        goals: [{inventory: coal_1}]
+      - command: "Put iron_2 away in your inventory."
+        setup: [{action: pick, label: iron_2}]
+        steps: [{tool: store}]
+        goals: [{inventory: iron_2}]
+      - command: "Set the coal down."
+        setup: [{action: pick, label: coal_1}]
+        steps: [{tool: drop, label: coal_1}]
+        goals: [{empty_handed: true}]
+      - command: "Release the iron ore you are carrying."
+        setup: [{action: pick, label: iron_1}]
+        steps: [{tool: drop, label: iron_1}]
+        goals: [{empty_handed: true}]
+      - command: "Place coal_2 on the ground here."
+        setup: [{action: pick, label: coal_2}]
+        steps: [{tool: drop, label: coal_2}]
+        goals: [{empty_handed: true}]
+      - command: "Leave the iron ore you have on the ground."
+        setup: [{action: pick, label: iron_2}]
+        steps: [{tool: drop, label: iron_2}]
+        goals: [{empty_handed: true}]
+
+  - id: double
+    name: 이중 행동
+    tasks:
+      - command: "Walk to iron_2, then walk to coal_1."
+        steps: [{tool: move_to, label: iron_2}, {tool: move_to, label: coal_1}]
+        goals: [{agent_near: coal_1}, {empty_handed: true}]
+      - command: "Look at the furnace and then look at coal_1."
+        steps: [{tool: look_at, label: furnace_1}, {tool: look_at, label: coal_1}]
+        goals: [{empty_handed: true}]
+      - command: "Pick up coal_1, then head to the furnace."
+        steps: [{tool: pick, label: coal_1}, {tool: move_to, label: furnace_1}]
+        goals: [{carrying: coal_1}, {agent_near: furnace_1}]
+      - command: "Grab iron_2 and drop it beside coal_1."
+        steps: [{tool: pick, label: iron_2}, {tool: drop, label: iron_2, near_label: coal_1}]
+        goals: [{near: [iron_2, coal_1]}]
+      - command: "Fetch a coal and stash it in your inventory."
+        steps: [{tool: pick, label: coal}, {tool: store}]
+        goals: [{inventory: coal}]
+      - command: "Turn toward iron_1, then pick up a coal."
+        steps: [{tool: look_at, label: iron_1}, {tool: pick, label: coal}]
+        goals: [{carrying: coal}]
+      - command: "Carry iron_1 next to the furnace."
+        steps: [{tool: pick, label: iron_1}, {tool: drop, label: iron_1, near_label: furnace_1}]
+        goals: [{near: [iron_1, furnace_1]}]
+      - command: "Take coal_2 and leave it next to iron_1."
+        steps: [{tool: pick, label: coal_2}, {tool: drop, label: coal_2, near_label: iron_1}]
+        goals: [{near: [coal_2, iron_1]}]
+      - command: "Drop the coal you're holding, then pick up iron_2."
+        setup: [{action: pick, label: coal_1}]
+        steps: [{tool: drop, label: coal_1}, {tool: pick, label: iron_2}]
+        goals: [{carrying: iron_2}]
+      - command: "Put the iron you're holding into your inventory, then go to the furnace."
+        setup: [{action: pick, label: iron_2}]
+        steps: [{tool: store}, {tool: move_to, label: furnace_1}]
+        goals: [{inventory: iron_2}, {agent_near: furnace_1}]
+      - command: "Visit iron_1 first and then coal_2."
+        steps: [{tool: move_to, label: iron_1}, {tool: move_to, label: coal_2}]
+        goals: [{agent_near: coal_2}, {empty_handed: true}]
+      - command: "Bring a piece of iron ore to coal_2."
+        steps: [{tool: pick, label: iron}, {tool: drop, label: iron, near_label: coal_2}]
+        goals: [{near: [iron, coal_2]}]
+      - command: "Look at coal_2, then look at iron_2."
+        steps: [{tool: look_at, label: coal_2}, {tool: look_at, label: iron_2}]
+        goals: [{empty_handed: true}]
+      - command: "Pick up iron_1 and then turn toward coal_1."
+        steps: [{tool: pick, label: iron_1}, {tool: look_at, label: coal_1}]
+        goals: [{carrying: iron_1}]
+      - command: "Grab coal_2, then put it on the ground."
+        steps: [{tool: pick, label: coal_2}, {tool: drop, label: coal_2}]
+        goals: [{empty_handed: true}]
+      - command: "Face iron_2, then go to the furnace."
+        steps: [{tool: look_at, label: iron_2}, {tool: move_to, label: furnace_1}]
+        goals: [{agent_near: furnace_1}, {empty_handed: true}]
+      - command: "Pick up iron_2 and store it."
+        steps: [{tool: pick, label: iron_2}, {tool: store}]
+        goals: [{inventory: iron_2}]
+      - command: "Move to iron_1 while carrying the coal, then drop the coal there."
+        setup: [{action: pick, label: coal_2}]
+        steps: [{tool: move_to, label: iron_1}, {tool: drop, label: coal_2}]
+        goals: [{near: [coal_2, iron_1]}]
+      - command: "Collect coal_1 and put it near iron_2."
+        steps: [{tool: pick, label: coal_1}, {tool: drop, label: coal_1, near_label: iron_2}]
+        goals: [{near: [coal_1, iron_2]}]
+      - command: "Go to the furnace, then come back near coal_2."
+        steps: [{tool: move_to, label: furnace_1}, {tool: move_to, label: coal_2}]
+        goals: [{agent_near: coal_2}, {empty_handed: true}]
+
+  - id: complex
+    name: 복합 행동
+    tasks:
+      - command: "Bring coal_1 and coal_2 next to iron_1."
+        ordered: false
+        steps:
+          - {tool: pick, label: coal_1}
+          - {tool: pick, label: coal_2}
+          - {tool: drop, label: coal_1, near_label: iron_1}
+          - {tool: drop, label: coal_2, near_label: iron_1}
+        goals: [{near: [coal_1, iron_1]}, {near: [coal_2, iron_1]}]
+      - command: "Pick up iron_2, walk to the furnace, and drop it there."
+        steps:
+          - {tool: pick, label: iron_2}
+          - {tool: move_to, label: furnace_1}
+          - {tool: drop, label: iron_2}
+        goals: [{near: [iron_2, furnace_1]}]
+      - command: "Look at coal_1, then at coal_2, then at the furnace."
+        steps:
+          - {tool: look_at, label: coal_1}
+          - {tool: look_at, label: coal_2}
+          - {tool: look_at, label: furnace_1}
+        goals: [{empty_handed: true}]
+      - command: "Visit coal_1, iron_2, and then the furnace, in that order."
+        steps:
+          - {tool: move_to, label: coal_1}
+          - {tool: move_to, label: iron_2}
+          - {tool: move_to, label: furnace_1}
+        goals: [{agent_near: furnace_1}, {empty_handed: true}]
+      - command: "Collect both pieces of iron ore and keep them in your inventory."
+        ordered: false
+        steps:
+          - {tool: pick, label: iron_1}
+          - {tool: pick, label: iron_2}
+          - {tool: store}
+        goals: [{inventory: iron_1}, {inventory: iron_2}]
+      - command: "Take coal_2 to the furnace, then take iron_1 to the furnace too."
+        steps:
+          - {tool: pick, label: coal_2}
+          - {tool: drop, label: coal_2, near_label: furnace_1}
+          - {tool: pick, label: iron_1}
+          - {tool: drop, label: iron_1, near_label: furnace_1}
+        goals: [{near: [coal_2, furnace_1]}, {near: [iron_1, furnace_1]}]
+      - command: "Move coal_1 next to iron_2, then go to the furnace."
+        steps:
+          - {tool: pick, label: coal_1}
+          - {tool: drop, label: coal_1, near_label: iron_2}
+          - {tool: move_to, label: furnace_1}
+        goals: [{near: [coal_1, iron_2]}, {agent_near: furnace_1}]
+      - command: "Pick up coal_2 and iron_1, then drop both of them next to coal_1."
+        ordered: false
+        steps:
+          - {tool: pick, label: coal_2}
+          - {tool: pick, label: iron_1}
+          - {tool: drop, label: coal_2, near_label: coal_1}
+          - {tool: drop, label: iron_1, near_label: coal_1}
+        goals: [{near: [coal_2, coal_1]}, {near: [iron_1, coal_1]}]
+      - command: "Face the furnace, pick up iron_2, and put it in your inventory."
+        steps:
+          - {tool: look_at, label: furnace_1}
+          - {tool: pick, label: iron_2}
+          - {tool: store}
+        goals: [{inventory: iron_2}]
+      - command: "Gather every coal and every iron ore next to the furnace."
+        ordered: false
+        steps:
+          - {tool: pick, label: coal_1}
+          - {tool: pick, label: coal_2}
+          - {tool: pick, label: iron_1}
+          - {tool: pick, label: iron_2}
+          - {tool: drop, label: coal_1, near_label: furnace_1}
+          - {tool: drop, label: coal_2, near_label: furnace_1}
+          - {tool: drop, label: iron_1, near_label: furnace_1}
+          - {tool: drop, label: iron_2, near_label: furnace_1}
+        goals:
+          - {near: [coal_1, furnace_1]}
+          - {near: [coal_2, furnace_1]}
+          - {near: [iron_1, furnace_1]}
+          - {near: [iron_2, furnace_1]}
+      - command: "Go to iron_1, look at coal_2, then go to coal_2."
+        steps:
+          - {tool: move_to, label: iron_1}
+          - {tool: look_at, label: coal_2}
+          - {tool: move_to, label: coal_2}
+        goals: [{agent_near: coal_2}, {empty_handed: true}]
+      - command: "Store the coal you're holding, pick up iron_2, and carry it to the furnace."
+        setup: [{action: pick, label: coal_1}]
+        steps:
+          - {tool: store}
+          - {tool: pick, label: iron_2}
+          - {tool: drop, label: iron_2, near_label: furnace_1}
+        goals: [{inventory: coal_1}, {near: [iron_2, furnace_1]}]
+      - command: "Pick up a coal, look at the furnace, and then drop the coal next to the furnace."
+        steps:
+          - {tool: pick, label: coal}
+          - {tool: look_at, label: furnace_1}
+          - {tool: drop, label: coal, near_label: furnace_1}
+        goals: [{near: [coal, furnace_1]}]
+      - command: "Put iron_1 next to iron_2, then put coal_1 next to them as well."
+        steps:
+          - {tool: pick, label: iron_1}
+          - {tool: drop, label: iron_1, near_label: iron_2}
+          - {tool: pick, label: coal_1}
+          - {tool: drop, label: coal_1, near_label: iron}
+        goals: [{near: [iron_1, iron_2]}, {near: [coal_1, iron]}]
+      - command: "Walk to coal_2, then to iron_1, then look back at the furnace."
+        steps:
+          - {tool: move_to, label: coal_2}
+          - {tool: move_to, label: iron_1}
+          - {tool: look_at, label: furnace_1}
+        goals: [{agent_near: iron_1}, {empty_handed: true}]
+      - command: "Grab iron_1, store it, then grab coal_2 as well."
+        steps:
+          - {tool: pick, label: iron_1}
+          - {tool: store}
+          - {tool: pick, label: coal_2}
+        goals: [{inventory: iron_1}, {carrying: coal_2}]
+      - command: "Move iron_2 to coal_2, and then move coal_1 to the furnace."
+        steps:
+          - {tool: pick, label: iron_2}
+          - {tool: drop, label: iron_2, near_label: coal_2}
+          - {tool: pick, label: coal_1}
+          - {tool: drop, label: coal_1, near_label: furnace_1}
+        goals: [{near: [iron_2, coal_2]}, {near: [coal_1, furnace_1]}]
+      - command: "Pick up coal_1, put it down beside iron_1, and then look at the furnace."
+        steps:
+          - {tool: pick, label: coal_1}
+          - {tool: drop, label: coal_1, near_label: iron_1}
+          - {tool: look_at, label: furnace_1}
+        goals: [{near: [coal_1, iron_1]}]
+      - command: "Go to the furnace, pick up the nearest iron ore, and bring it back to the furnace."
+        steps:
+          - {tool: move_to, label: furnace_1}
+          - {tool: pick, label: iron}
+          - {tool: drop, label: iron, near_label: furnace_1}
+        goals: [{near: [iron, furnace_1]}]
+      - command: "Take coal_2 to iron_2, then return to the furnace and look at coal_1."
+        steps:
+          - {tool: pick, label: coal_2}
+          - {tool: drop, label: coal_2, near_label: iron_2}
+          - {tool: move_to, label: furnace_1}
+          - {tool: look_at, label: coal_1}
+        goals: [{near: [coal_2, iron_2]}, {agent_near: furnace_1}]
+
+  - id: abstract
+    name: 추상적 명령
+    tasks:
+      - command: "Grab whatever you like."
+        steps: [{tool: pick, label: any}]
+        goals: [{carrying: any}]
+      - command: "Wander over to something."
+        steps: [{tool: move_to, label: any}]
+        goals: [{empty_handed: true}]
+      - command: "Look at something interesting."
+        steps: [{tool: look_at, label: any}]
+        goals: [{empty_handed: true}]
+      - command: "Put any coal somewhere near the furnace."
+        steps: [{tool: pick, label: coal}, {tool: drop, label: coal, near_label: furnace_1}]
+        goals: [{near: [coal, furnace_1]}]
+      - command: "Take an object of your choice and store it."
+        steps: [{tool: pick, label: any}, {tool: store}]
+        goals: [{inventory: any}]
+      - command: "Move any iron ore next to any coal."
+        steps: [{tool: pick, label: iron}, {tool: drop, label: iron, near_label: coal}]
+        goals: [{near: [iron, coal]}]
+      - command: "Go somewhere near the furnace."
+        steps: [{tool: move_to, label: any}]
+        goals: [{agent_near: furnace_1}, {empty_handed: true}]
+      - command: "Choose an item, carry it a little, and set it down."
+        steps: [{tool: pick, label: any}, {tool: drop, label: any}]
+        goals: [{empty_handed: true}]
+      - command: "Tidy up by putting a couple of things beside the furnace."
+        ordered: false
+        steps:
+          - {tool: pick, label: any}
+          - {tool: pick, label: any}
+          - {tool: drop, label: any, near_label: furnace_1}
+          - {tool: drop, label: any, near_label: furnace_1}
+        goals: [{near: [any, furnace_1]}]
+      - command: "Face whichever iron ore is closest to you."
+        steps: [{tool: look_at, label: iron_2}]
+        goals: [{empty_handed: true}]
+      - command: "Walk to whichever coal is closest to you."
+        steps: [{tool: move_to, label: coal_2}]
+        goals: [{agent_near: coal_2}, {empty_handed: true}]
+      - command: "Get rid of what you're holding."
+        setup: [{action: pick, label: iron_1}]
+        steps: [{tool: drop, label: iron_1}]
+        goals: [{empty_handed: true}]
+      - command: "Put something next to something else."
+        steps: [{tool: pick, label: any}, {tool: drop, label: any, near_label: any}]
+        goals: [{near: [any, any]}]
+      - command: "Turn and look at one of the coals."
+        steps: [{tool: look_at, label: coal}]
+        goals: [{empty_handed: true}]
+      - command: "Carry something to coal_1."
+        steps: [{tool: pick, label: any}, {tool: drop, label: any, near_label: coal_1}]
+        goals: [{near: [any, coal_1]}]
+      - command: "Make sure there is an iron ore next to the furnace."
+        steps: [{tool: pick, label: iron}, {tool: drop, label: iron, near_label: furnace_1}]
+        goals: [{near: [iron, furnace_1]}]
+      - command: "Put a coal wherever you think is best."
+        steps: [{tool: pick, label: coal}, {tool: drop, label: coal}]
+        goals: [{empty_handed: true}]
+      - command: "Hold onto any iron ore."
+        steps: [{tool: pick, label: iron}]
+        goals: [{carrying: iron}]
+      - command: "Head toward any iron ore and look at the furnace from there."
+        steps: [{tool: move_to, label: iron}, {tool: look_at, label: furnace_1}]
+        goals: [{agent_near: iron}, {empty_handed: true}]
+      - command: "Place some object beside one of the iron ores."
+        steps: [{tool: pick, label: any}, {tool: drop, label: any, near_label: iron}]
+        goals: [{near: [any, iron]}]

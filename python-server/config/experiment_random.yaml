@@ -1,0 +1,25 @@
+# 시드 무작위 실험. python -m agent experiment --suite config/experiment_random.yaml
+# 시행마다 현재 시각(ms)을 시드로 Unity 객체 배치(화로·석탄·철광석)를 바꾸고, 같은 시드로 agent/command_gen.py가 명령을 만든다.
+# Terrain과 장애물은 그대로다. 시드·명령·정답 행동은 시행 CSV에 남는다.
+
+trials: 100
+
+areas:
+  - id: single
+    name: 단일 행동
+    measure_steps: false
+    generator: single
+    # 이동 30, 회전·관찰(look_at) 40, 집기·배치 30(pick 10, drop 10, store 10)
+    quota: {move: 30, look: 40, pick: 10, drop: 10, store: 10}
+
+  - id: double
+    name: 이중 행동
+    generator: double
+
+  - id: complex
+    name: 복합 행동
+    generator: complex
+
+  - id: abstract
+    name: 추상적 명령
+    generator: abstract

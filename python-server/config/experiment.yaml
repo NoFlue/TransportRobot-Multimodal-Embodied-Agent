@@ -1,0 +1,104 @@
+# 논문 실험용 테스트 정의. python -m agent experiment 가 읽는다.
+# 시행마다 Unity 월드를 리셋하고 새 대화에서 명령 하나를 실행한다. 영역의 tasks를 차례로 돌려 trials회를 채운다.
+#
+# steps: 반드시 성공해야 하는 행동 단계. Unity가 성공으로 보고한 도구 호출과 맞춘다.
+#   label / near_label 값: 정확한 label(coal_1), 종류(coal), 또는 any. 생략하면 무엇이든 맞는다.
+# ordered: true면 순서대로(최장 공통 부분열), false면 순서와 관계없이 센다. 기본 true.
+# goals: 명령이 끝난 뒤 최종 관측에서 확인할 조건.
+#   agent_near: X        에이전트가 X 근처(near_radius_meters 이내)
+#   near: [A, B]         땅에 놓인 A가 B 근처
+#   carrying: A          손이나 인벤토리에 A
+#   inventory: A         인벤토리에 A
+#   empty_handed: true   아무것도 들고 있지 않음
+# setup: 명령 전에 Unity에 직접 보내는 준비 행동(에이전트 추론을 거치지 않음).
+# 성공 = 정상 종료(end_reason=answered) + steps 전부 완료 + goals 전부 충족.
+
+trials: 20
+
+areas:
+  - id: single
+    name: 단일 행동
+    measure_steps: false
+    tasks:
+      - command: 화로 근처로 이동해
+        steps: [{tool: move_to, label: furnace_1}]
+        goals: [{agent_near: furnace_1}, {empty_handed: true}]
+      - command: 철광석 쪽을 바라봐
+        steps: [{tool: look_at, label: iron}]
+        goals: [{empty_handed: true}]
+      - command: 석탄 하나 주워
+        steps: [{tool: pick, label: coal}]
+        goals: [{carrying: coal}]
+      - command: 손에 든 석탄을 인벤토리에 넣어
+        setup: [{action: pick, label: coal_1}]
+        steps: [{tool: store}]
+        goals: [{inventory: coal_1}]
+      - command: 들고 있는 철광석을 내려놔
+        setup: [{action: pick, label: iron_2}]
+        steps: [{tool: drop, label: iron_2}]
+        goals: [{empty_handed: true}]
+
+  - id: double
+    name: 이중 행동
+    tasks:
+      - command: 석탄 하나를 주워서 화로 옆에 놔
+        steps: [{tool: pick, label: coal}, {tool: drop, label: coal, near_label: furnace_1}]
+        goals: [{near: [coal, furnace_1]}]
+      - command: 화로 근처로 간 다음 철광석 쪽을 바라봐
+        steps: [{tool: move_to, label: furnace_1}, {tool: look_at, label: iron}]
+        goals: [{agent_near: furnace_1}, {empty_handed: true}]
+      - command: 철광석 하나를 주워서 인벤토리에 넣어
+        steps: [{tool: pick, label: iron}, {tool: store}]
+        goals: [{inventory: iron}]
+      - command: 석탄 coal_2 쪽을 바라본 다음 그 근처로 이동해
+        steps: [{tool: look_at, label: coal_2}, {tool: move_to, label: coal_2}]
+        goals: [{agent_near: coal_2}, {empty_handed: true}]
+
+  - id: complex
+    name: 복합 행동
+    tasks:
+      - command: 석탄 1개와 철광석 1개를 주워서 화로 주변에 둬
+        ordered: false
+        steps:
+          - {tool: pick, label: coal}
+          - {tool: pick, label: iron}
+          - {tool: drop, label: coal, near_label: furnace_1}
+          - {tool: drop, label: iron, near_label: furnace_1}
+        goals: [{near: [coal, furnace_1]}, {near: [iron, furnace_1]}]
+      - command: 석탄 2개를 모두 주워서 화로 옆에 놔
+        ordered: false
+        steps:
+          - {tool: pick, label: coal_1}
+          - {tool: pick, label: coal_2}
+          - {tool: drop, label: coal_1, near_label: furnace_1}
+          - {tool: drop, label: coal_2, near_label: furnace_1}
+        goals: [{near: [coal_1, furnace_1]}, {near: [coal_2, furnace_1]}]
+      - command: 철광석 하나를 주워 인벤토리에 넣고, 화로로 가서 화로를 바라봐
+        steps:
+          - {tool: pick, label: iron}
+          - {tool: store}
+          - {tool: move_to, label: furnace_1}
+          - {tool: look_at, label: furnace_1}
+        goals: [{inventory: iron}, {agent_near: furnace_1}]
+      - command: 화로 근처로 이동한 다음, 석탄 하나를 주워서 철광석 옆에 놔
+        steps:
+          - {tool: move_to, label: furnace_1}
+          - {tool: pick, label: coal}
+          - {tool: drop, label: coal, near_label: iron}
+        goals: [{near: [coal, iron]}]
+
+  - id: abstract
+    name: 추상적 명령
+    tasks:
+      - command: 아무거나 하나 주워
+        steps: [{tool: pick, label: any}]
+        goals: [{carrying: any}]
+      - command: 아무 데나 가 봐
+        steps: [{tool: move_to, label: any}]
+        goals: [{empty_handed: true}]
+      - command: 아무 물건이나 하나 주워서 아무 데나 내려놔
+        steps: [{tool: pick, label: any}, {tool: drop, label: any}]
+        goals: [{empty_handed: true}]
+      - command: 아무 물건이나 하나 화로 옆에 갖다 놔
+        steps: [{tool: pick, label: any}, {tool: drop, label: any, near_label: furnace_1}]
+        goals: [{near: [any, furnace_1]}]

@@ -82,5 +82,6 @@ class UnityClient:
     async def cancel(self) -> bool:
         return bool((await self._request("POST", "/act/cancel"))["cancelled"])
 
-    async def reset_world(self) -> None:
-        await self._request("POST", "/world/reset")
+    async def reset_world(self, seed: int | None = None) -> None:
+        """seed가 있으면 Unity가 그 시드로 객체 배치를 바꾼다. 없으면 처음 배치로 되돌린다."""
+        await self._request("POST", "/world/reset", json=None if seed is None else {"seed": seed})

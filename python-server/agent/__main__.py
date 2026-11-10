@@ -1,4 +1,4 @@
-"""CLI: python -m agent serve | chat | run "명령" | reset"""
+"""CLI: python -m agent serve | chat | run "명령" | reset | experiment"""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import sys
+from pathlib import Path
 
 from agent.config import load_settings
 from agent.service import AgentService
@@ -81,6 +82,12 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("text")
     run.add_argument("--reset", action="store_true", help="reset the Unity world first")
     commands.add_parser("reset", help="reset the Unity world")
+    experiment = commands.add_parser("experiment", help="run the success-rate experiment in config/experiment.yaml")
+    experiment.add_argument("--suite", type=Path, help="test definition file (default: config/experiment.yaml)")
+    experiment.add_argument("--areas", help="comma-separated area ids to run, e.g. double,complex")
+    experiment.add_argument("--trials", type=int, help="trials per area (default: value in the suite)")
+    experiment.add_argument("--out", type=Path, help="output folder; reuse one to keep appending to its summary.csv")
+    experiment.add_argument("--replay", type=Path, help="reuse seeds, categories and commands from another experiment folder")
     args = parser.parse_args(argv)
 
     settings = load_settings(profile=args.profile, judge_profile=args.judge_profile, planner_profile=args.planner_profile)
@@ -93,6 +100,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "reset":
         asyncio.run(_reset(settings))
+        return 0
+    if args.command == "experiment":
+        from agent.experiment import run_experiment
+
+        suite = args.suite or settings.config_dir / "experiment.yaml"
+        areas = [area.strip() for area in args.areas.split(",")] if args.areas else None
+        asyncio.run(run_experiment(settings, suite, areas=areas, trials=args.trials, out_dir=args.out, replay=args.replay))
         return 0
     service = AgentService(settings)
     if args.command == "chat":

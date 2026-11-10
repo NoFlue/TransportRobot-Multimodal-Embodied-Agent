@@ -36,6 +36,8 @@ namespace MultimodalAgent
         readonly ConcurrentQueue<Action> mainThreadQueue = new ConcurrentQueue<Action>();
         readonly List<(LabeledObject obj, Transform parent, Vector3 position, Quaternion rotation)> initialObjects =
             new List<(LabeledObject, Transform, Vector3, Quaternion)>();
+        // NavMesh를 마지막으로 구웠을 때 고정 객체(화로)의 자세. 달라지면 다시 굽는다.
+        readonly Dictionary<LabeledObject, Pose> bakedFixedPoses = new Dictionary<LabeledObject, Pose>();
 
         AgentHttpServer server;
         readonly ObjectLocator locator = new ObjectLocator();
@@ -112,6 +114,7 @@ namespace MultimodalAgent
             foreach (var obj in LabeledObject.All)
             {
                 initialObjects.Add((obj, obj.transform.parent, obj.transform.position, obj.transform.rotation));
+                if (!obj.Pickable) bakedFixedPoses[obj] = new Pose(obj.transform.position, obj.transform.rotation);
             }
 
             server = new AgentHttpServer(HandleAsync);
@@ -181,8 +184,11 @@ namespace MultimodalAgent
                 case "POST /act/cancel":
                     return Json(200, await OnMainThread(() => new { cancelled = RequestCancel() }));
                 case "POST /world/reset":
-                    await OnMainThread(ResetWorld);
-                    return Json(200, new { status = "reset" });
+                {
+                    var reset = Parse<ResetRequestDto>(body);
+                    await OnMainThread(() => ResetWorld(reset?.Seed));
+                    return Json(200, new { status = "reset", seed = reset?.Seed });
+                }
                 default:
                     return Json(404, new { error = $"No endpoint {method} {path}" });
             }
@@ -386,7 +392,7 @@ namespace MultimodalAgent
             return true;
         }
 
-        void ResetWorld()
+        void ResetWorld(int? seed)
         {
             if (currentRoutine != null)
             {
@@ -400,8 +406,39 @@ namespace MultimodalAgent
                 obj.PlaceAt(parent, position, rotation);
             }
             locator.Forget();
+            if (seed.HasValue)
+            {
+                // Terrain과 장애물(Obstacles 아래, 예: label이 붙은 Minecart)은 그대로 두고 나머지 label 객체만 옮긴다.
+                var tracked = initialObjects.Select(entry => entry.obj).Where(obj => obj != null).ToList();
+                var obstacles = tracked.Where(IsObstacle).ToList();
+                WorldRandomizer.Apply(seed.Value, agentStartPosition, tracked.Except(obstacles).ToList(),
+                    obstacles.Select(obj => obj.transform.position), SyncNavMesh);
+            }
+            else
+            {
+                SyncNavMesh();
+            }
             agent.Teleport(agentStartPosition, agentStartRotation);
             LastMessage = null;
+        }
+
+        /// <summary>장애물(Obstacles 아래)에 붙은 label 객체인지. 무작위 배치에서 옮기지 않는다.</summary>
+        static bool IsObstacle(LabeledObject obj) =>
+            obj.GetComponentsInParent<Transform>(true).Any(t => t.name == "Obstacles");
+
+        /// <summary>고정 객체가 마지막으로 구운 자리에서 옮겨졌으면 NavMesh를 다시 굽는다.</summary>
+        void SyncNavMesh()
+        {
+            Physics.SyncTransforms();
+            var changed = bakedFixedPoses.Any(entry => entry.Key != null &&
+                ((entry.Value.position - entry.Key.transform.position).sqrMagnitude > 1e-4f ||
+                 Quaternion.Angle(entry.Value.rotation, entry.Key.transform.rotation) > 0.1f));
+            if (!changed) return;
+            foreach (var surface in FindObjectsByType<NavMeshSurface>(FindObjectsSortMode.None)) surface.BuildNavMesh();
+            foreach (var obj in bakedFixedPoses.Keys.ToList())
+            {
+                if (obj != null) bakedFixedPoses[obj] = new Pose(obj.transform.position, obj.transform.rotation);
+            }
         }
 
         // ---------------- 관측 ----------------
